@@ -40,7 +40,16 @@ PROVIDERS: dict[str, list[str]] = {
 
 
 class ProviderUnavailable(RuntimeError):
-    pass
+    """A provider could not answer.
+
+    `retryable` separates a temporary condition (rate limit, server overload)
+    from a permanent one (bad key, unknown model). The first should be waited
+    out; the second should stop the agent using that provider at all.
+    """
+
+    def __init__(self, message: str, retryable: bool = False):
+        super().__init__(message)
+        self.retryable = retryable
 
 
 @dataclass
@@ -176,9 +185,11 @@ class Agent:
         try:
             reply = self.provider.ask(full, cwd=self.workdir)
         except ProviderUnavailable as exc:
-            # Remember the failure: retrying a dead provider on every message
-            # just burns the round trip and floods the log with the same error.
-            self._provider_dead = str(exc)
+            # Remember only permanent failures. Marking a provider dead because
+            # the service was briefly busy would take an agent offline for the
+            # rest of the mission over a blip.
+            if not getattr(exc, "retryable", False):
+                self._provider_dead = str(exc)
             self.hive.event("agent.provider_failed",
                             {"agent": self.name, "provider": self.provider.name,
                              "reason": str(exc)})

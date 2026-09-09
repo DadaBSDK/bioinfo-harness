@@ -16,6 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -36,13 +37,23 @@ def api_key() -> str:
     return ""
 
 
-def _request(url: str, payload: dict[str, Any] | None, timeout: float) -> Any:
+def _request(url: str, payload: dict[str, Any] | None, timeout: float,
+             key: str = "") -> Any:
+    """The key travels in a header, never the query string: URLs end up in
+    proxy logs, access logs and shell history."""
     data = json.dumps(payload).encode() if payload is not None else None
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["X-goog-api-key"] = key
     req = urllib.request.Request(
         url, data=data, method="POST" if payload is not None else "GET",
-        headers={"Content-Type": "application/json"})
+        headers=headers)
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read())
+
+
+# Overload and rate limiting pass; a bad key or a missing model does not.
+RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
 def _explain(exc: urllib.error.HTTPError) -> str:
@@ -66,9 +77,8 @@ def available_models(key: str = "", timeout: float = 10.0) -> list[str]:
     key = key or api_key()
     if not key:
         return []
-    url = f"{API_ROOT}/models?key={urllib.parse.quote(key)}&pageSize=200"
     try:
-        data = _request(url, None, timeout)
+        data = _request(f"{API_ROOT}/models?pageSize=200", None, timeout, key)
     except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
         return []
     out = []
@@ -88,13 +98,16 @@ class GeminiProvider:
     max_tokens: int = 2048
     temperature: float = 0.2
     timeout_s: float = 300.0
+    retries: int = 3
     _models: list[str] = field(default_factory=list)
 
     def refresh(self) -> list[str]:
         self._models = available_models()
         # With no model named, take the first the key can actually use.
         if not self.model and self._models:
-            preferred = [m for m in self._models if "flash" in m] or self._models
+            preferred = ([m for m in self._models if m == "gemini-flash-latest"]
+                         or [m for m in self._models if "flash" in m and "lite" not in m]
+                         or self._models)
             self.model = preferred[0]
         return self._models
 
@@ -113,6 +126,18 @@ class GeminiProvider:
             return "the key was rejected, or the Gemini API is unreachable"
         return f"model {self.model!r} is not available to this key"
 
+    def _call(self, url: str, payload: dict[str, Any], key: str) -> Any:
+        try:
+            return _request(url, payload, self.timeout_s, key)
+        except urllib.error.HTTPError as exc:
+            raise ProviderUnavailable(_explain(exc),
+                                      retryable=exc.code in RETRYABLE_STATUS) from exc
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            raise ProviderUnavailable(f"cannot reach the Gemini API: {exc}",
+                                      retryable=True) from exc
+        except json.JSONDecodeError as exc:
+            raise ProviderUnavailable(f"Gemini sent malformed JSON: {exc}") from exc
+
     def ask(self, prompt: str, cwd: Path | None = None,
             env: dict[str, str] | None = None) -> LLMReply:
         key = api_key()
@@ -123,8 +148,7 @@ class GeminiProvider:
         if not self.model:
             raise ProviderUnavailable(self.unavailable_reason())
 
-        url = (f"{API_ROOT}/models/{urllib.parse.quote(self.model)}"
-               f":generateContent?key={urllib.parse.quote(key)}")
+        url = f"{API_ROOT}/models/{urllib.parse.quote(self.model)}:generateContent"
         payload = {
             "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": self.max_tokens,
@@ -132,15 +156,19 @@ class GeminiProvider:
         }
 
         started = time.time()
-        try:
-            data = _request(url, payload, self.timeout_s)
-        except urllib.error.HTTPError as exc:
-            raise ProviderUnavailable(_explain(exc)) from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            raise ProviderUnavailable(f"cannot reach the Gemini API: {exc}") from exc
-        except json.JSONDecodeError as exc:
-            raise ProviderUnavailable(f"Gemini sent malformed JSON: {exc}") from exc
+        data = None
+        for attempt in range(self.retries + 1):
+            try:
+                data = self._call(url, payload, key)
+                break
+            except ProviderUnavailable as exc:
+                # Ride out a busy service rather than failing the mission for it.
+                if not exc.retryable or attempt == self.retries:
+                    raise
+                time.sleep(min(8.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.4))
+        assert data is not None
 
+        candidates = data.get("candidates") or []
         candidates = data.get("candidates") or []
         if not candidates:
             blocked = (data.get("promptFeedback") or {}).get("blockReason")
@@ -156,12 +184,17 @@ class GeminiProvider:
                 f"Gemini stopped without output (finishReason: {first['finishReason']})")
 
         usage = data.get("usageMetadata") or {}
+        # Gemini bills thinking separately from the visible answer, and it
+        # dominates: a two-token reply can carry ~190 thinking tokens. Counting
+        # only candidatesTokenCount under-reports usage by an order of magnitude.
+        generated = (int(usage.get("candidatesTokenCount") or 0)
+                     + int(usage.get("thoughtsTokenCount") or 0))
         return LLMReply(
             text=text.strip(),
             provider=f"{self.name}:{self.model}",
             seconds=time.time() - started,
             tokens_in=int(usage.get("promptTokenCount") or 0),
-            tokens_out=int(usage.get("candidatesTokenCount") or 0),
+            tokens_out=generated,
             # Tokens are recorded; dollars are not, because this harness does
             # not carry a verified Gemini price table. The ledger will show
             # usage without inventing a cost.

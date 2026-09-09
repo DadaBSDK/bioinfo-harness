@@ -192,7 +192,15 @@ bioharness staff hire nova --role analyst --provider gemini-api
 
 Model ids are discovered from the API rather than hardcoded, so the hire form
 offers exactly what your key can call and a retired model id cannot rot in the
-source. Naming no model picks the cheapest available tier.
+source. Naming no model picks a flash tier.
+
+The key is sent as an `X-goog-api-key` header, never in the query string —
+URLs end up in proxy logs, access logs and shell history. Thinking tokens
+(`thoughtsTokenCount`) are counted as output: on a flash model a two-token
+answer routinely carries ~190 thinking tokens, so ignoring them would
+under-report usage by an order of magnitude. Overload and rate-limit responses
+(429, 5xx) are retried with backoff and do not take the agent offline; a
+rejected key or unknown model is permanent and does.
 
 **A Gemini API key is not an Antigravity key.** Google retired the standalone
 Gemini CLI in June 2026 in favour of the Antigravity CLI, which authenticates
@@ -323,7 +331,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 149 passed
+pytest -q     # 163 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

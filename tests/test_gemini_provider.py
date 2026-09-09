@@ -141,3 +141,104 @@ def test_reply_carries_text_and_token_usage(monkeypatch):
 def test_factory_builds_the_gemini_provider():
     p = make_provider("gemini-api", "gemini-x")
     assert isinstance(p, GeminiProvider) and p.model == "gemini-x"
+
+
+# -- transient failures ----------------------------------------------------
+@pytest.mark.parametrize("code", [429, 500, 502, 503, 504])
+def test_overload_and_rate_limits_are_marked_retryable(monkeypatch, code):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    monkeypatch.setattr(f"{MOD}._request",
+                        lambda *a, **k: (_ for _ in ()).throw(http_error(code, "busy")))
+    with pytest.raises(ProviderUnavailable) as exc:
+        GeminiProvider(model="m", retries=0).ask("hi")
+    assert exc.value.retryable is True
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404])
+def test_configuration_errors_are_not_retryable(monkeypatch, code):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    monkeypatch.setattr(f"{MOD}._request",
+                        lambda *a, **k: (_ for _ in ()).throw(http_error(code, "nope")))
+    with pytest.raises(ProviderUnavailable) as exc:
+        GeminiProvider(model="m", retries=0).ask("hi")
+    assert exc.value.retryable is False
+
+
+def test_a_transient_failure_is_retried_and_can_succeed(monkeypatch):
+    """A 503 blip should not cost the mission its plan."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    monkeypatch.setattr(f"{MOD}.time.sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise http_error(503, "high demand")
+        return {"candidates": [{"content": {"parts": [{"text": "ok"}]},
+                                "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1}}
+    monkeypatch.setattr(f"{MOD}._request", flaky)
+    assert GeminiProvider(model="m", retries=3).ask("hi").text == "ok"
+    assert calls["n"] == 3
+
+
+def test_retries_are_bounded(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    monkeypatch.setattr(f"{MOD}.time.sleep", lambda *_: None)
+    calls = {"n": 0}
+
+    def always_busy(*a, **k):
+        calls["n"] += 1
+        raise http_error(503, "high demand")
+    monkeypatch.setattr(f"{MOD}._request", always_busy)
+    with pytest.raises(ProviderUnavailable):
+        GeminiProvider(model="m", retries=2).ask("hi")
+    assert calls["n"] == 3, "one initial attempt plus two retries"
+
+
+def test_a_permanent_failure_is_not_retried(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "bad")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    calls = {"n": 0}
+
+    def rejected(*a, **k):
+        calls["n"] += 1
+        raise http_error(403, "API key not valid")
+    monkeypatch.setattr(f"{MOD}._request", rejected)
+    with pytest.raises(ProviderUnavailable):
+        GeminiProvider(model="m", retries=3).ask("hi")
+    assert calls["n"] == 1, "a bad key must not be retried"
+
+
+def test_thinking_tokens_are_counted_as_output(monkeypatch):
+    """Gemini bills thinking separately and it dominates; omitting it would
+    under-report usage by an order of magnitude."""
+    monkeypatch.setenv("GEMINI_API_KEY", "k")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    monkeypatch.setattr(f"{MOD}._request", lambda *a, **k: {
+        "candidates": [{"content": {"parts": [{"text": "hi"}]}, "finishReason": "STOP"}],
+        "usageMetadata": {"promptTokenCount": 11, "candidatesTokenCount": 2,
+                          "thoughtsTokenCount": 187},
+    })
+    assert GeminiProvider(model="m").ask("x").tokens_out == 189
+
+
+def test_the_key_never_appears_in_the_url(monkeypatch):
+    """Keys in query strings leak into proxy logs and shell history."""
+    monkeypatch.setenv("GEMINI_API_KEY", "SECRET-KEY")
+    monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
+    seen = {}
+
+    def capture(url, payload, timeout, key="", **k):
+        seen["url"] = url
+        seen["key"] = key
+        return {"candidates": [{"content": {"parts": [{"text": "ok"}]},
+                                "finishReason": "STOP"}], "usageMetadata": {}}
+    monkeypatch.setattr(f"{MOD}._request", capture)
+    GeminiProvider(model="m").ask("x")
+    assert "SECRET-KEY" not in seen["url"]
+    assert seen["key"] == "SECRET-KEY", "it must still be sent, as a header"
