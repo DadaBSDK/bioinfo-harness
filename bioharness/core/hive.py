@@ -310,6 +310,25 @@ class Hive:
                 return identity
         return self.enroll(name, role, **defaults)
 
+    def retarget(self, name: str, **changes: Any) -> dict[str, Any] | None:
+        """Change an enrolled agent's provider/model/autonomy in place.
+
+        Firing and re-hiring would archive the agent's memory and mail. An
+        agent that swaps backend is still the same agent, so its history stays.
+        """
+        identity_file = self.mailbox(name).dir / "identity.json"
+        if not identity_file.is_file():
+            return None
+        try:
+            identity = json.loads(identity_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            return None
+        identity.update({k: v for k, v in changes.items() if v is not None})
+        identity["retargeted"] = time.time()
+        atomic_write(identity_file, json.dumps(identity, indent=2, default=str))
+        self.event("agent.retargeted", {"name": name, **changes})
+        return identity
+
     def dismiss(self, name: str) -> bool:
         """Retire an agent. The directory is moved aside rather than deleted so
         its memory and message archive remain auditable."""

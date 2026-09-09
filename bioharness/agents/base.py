@@ -199,16 +199,34 @@ class Agent:
                          model=self.provider.model or self.provider.name)
         return reply.text
 
-    def think_json(self, prompt: str, context: str = "",
-                   fallback: Any = None) -> Any:
-        """Ask for JSON and parse it, tolerating fenced or chatty output."""
+    def think_json(self, prompt: str, context: str = "", fallback: Any = None,
+                   schema: dict[str, Any] | None = None) -> Any:
+        """Ask for JSON and parse it, tolerating fenced, chatty or truncated output.
+
+        When the provider can enforce a schema itself (the Antigravity CLI can),
+        use that rather than trusting a prompt instruction.
+        """
+        enforced = schema is not None and hasattr(self.provider, "json_schema")
+        if enforced:
+            self.provider.json_schema = json.dumps(schema)
         try:
             raw = self.think(prompt + "\n\nRespond with JSON only.", context)
         except ProviderUnavailable:
             if fallback is not None:
                 return fallback
             raise
-        return extract_json(raw, fallback)
+        finally:
+            if enforced:
+                self.provider.json_schema = ""
+        try:
+            return extract_json(raw, fallback)
+        except ValueError:
+            # Silence here reads as "the model had no answer", which is wrong
+            # and undiagnosable. Record what actually came back.
+            self.hive.event("agent.unparsed_reply",
+                            {"agent": self.name, "chars": len(raw),
+                             "head": raw[:400]})
+            raise
 
     # -- loop --------------------------------------------------------------
     def handle(self, msg: Message) -> dict[str, Any] | None:

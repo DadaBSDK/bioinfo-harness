@@ -29,6 +29,15 @@ def run_returns(stdout="", stderr="", code=0):
     return lambda *a, **k: SimpleNamespace(stdout=stdout, stderr=stderr, returncode=code)
 
 
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """The model listing is cached across calls; each test starts cold."""
+    from bioharness.agents import antigravity_provider as ap
+    ap._CACHE.update(models=None, at=0.0)
+    yield
+    ap._CACHE.update(models=None, at=0.0)
+
+
 @pytest.fixture
 def installed(monkeypatch):
     monkeypatch.setattr(f"{MOD}.shutil.which", lambda _: "/usr/bin/agy")
@@ -149,3 +158,111 @@ def test_factory_builds_the_dedicated_provider():
 def test_the_generic_cli_wrapper_does_not_shadow_it():
     """A generic entry would win in make_provider and lose the usage figures."""
     assert "antigravity" not in PROVIDERS
+
+
+# -- caching ---------------------------------------------------------------
+def test_the_model_listing_is_cached(monkeypatch, installed):
+    """Listing spawns the CLI and takes seconds; the dashboard polls often."""
+    calls = {"n": 0}
+
+    def counted(*a, **k):
+        calls["n"] += 1
+        return SimpleNamespace(stdout="m1\tOne\n", stderr="", returncode=0)
+    monkeypatch.setattr(f"{MOD}.subprocess.run", counted)
+    assert available_models() == ["m1"]
+    assert available_models() == ["m1"]
+    assert calls["n"] == 1, "the second call must come from cache"
+
+
+def test_refresh_bypasses_the_cache(monkeypatch, installed):
+    calls = {"n": 0}
+
+    def counted(*a, **k):
+        calls["n"] += 1
+        return SimpleNamespace(stdout="m1\tOne\n", stderr="", returncode=0)
+    monkeypatch.setattr(f"{MOD}.subprocess.run", counted)
+    available_models()
+    available_models(refresh=True)
+    assert calls["n"] == 2
+
+
+def test_a_failed_listing_is_cached_too(monkeypatch, installed):
+    """Otherwise every dashboard poll re-pays a multi-second failure."""
+    calls = {"n": 0}
+
+    def failing(*a, **k):
+        calls["n"] += 1
+        return SimpleNamespace(stdout="", stderr="not signed in", returncode=1)
+    monkeypatch.setattr(f"{MOD}.subprocess.run", failing)
+    assert available_models() == []
+    assert available_models() == []
+    assert calls["n"] == 1
+
+
+# -- structured output -----------------------------------------------------
+def test_structured_output_wins_over_the_prose_response(monkeypatch, installed):
+    """With --json-schema the CLI puts the validated object in
+    structured_output and leaves response as fenced prose."""
+    monkeypatch.setattr(f"{MOD}.subprocess.run", run_returns(stdout=json.dumps({
+        "status": "SUCCESS",
+        "response": '```json\n{"name":"x"}\n```\n{"toolAction":"Finishing task"}\n',
+        "structured_output": {"name": "x", "steps": []},
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+    })))
+    text = AntigravityProvider(model="m", json_schema="{}").ask("hi").text
+    assert json.loads(text) == {"name": "x", "steps": []}
+
+
+def test_the_schema_reaches_the_command_line(monkeypatch, installed):
+    seen = {}
+
+    def capture(cmd, **k):
+        seen["cmd"] = cmd
+        return SimpleNamespace(stdout=json.dumps(OK_JSON), stderr="", returncode=0)
+    monkeypatch.setattr(f"{MOD}.subprocess.run", capture)
+    AntigravityProvider(model="m", json_schema='{"type":"object"}').ask("hi")
+    assert seen["cmd"][seen["cmd"].index("--json-schema") + 1] == '{"type":"object"}'
+
+
+def test_an_empty_schema_reply_is_retried_without_the_schema(monkeypatch, installed):
+    """flash-medium/high sometimes finish a schema-constrained turn agentically
+    and emit nothing. Losing the turn to that is worse than asking again."""
+    calls = []
+
+    def flaky(cmd, **k):
+        calls.append(cmd)
+        if "--json-schema" in cmd:
+            return SimpleNamespace(stdout=json.dumps(
+                {"status": "SUCCESS", "response": "",
+                 "usage": {"input_tokens": 10, "output_tokens": 1186}}),
+                stderr="", returncode=0)
+        return SimpleNamespace(stdout=json.dumps(
+            {"status": "SUCCESS", "response": '{"name":"recovered"}',
+             "usage": {"input_tokens": 10, "output_tokens": 20}}),
+            stderr="", returncode=0)
+    monkeypatch.setattr(f"{MOD}.subprocess.run", flaky)
+    r = AntigravityProvider(model="m", json_schema='{"type":"object"}').ask("hi")
+    assert json.loads(r.text) == {"name": "recovered"}
+    assert len(calls) == 2 and "--json-schema" not in calls[1]
+    # The wasted thinking tokens still count against the ledger.
+    assert r.tokens_out == 1186 + 20
+
+
+def test_a_good_schema_reply_is_not_retried(monkeypatch, installed):
+    calls = []
+
+    def once(cmd, **k):
+        calls.append(cmd)
+        return SimpleNamespace(stdout=json.dumps(
+            {"status": "SUCCESS", "structured_output": {"ok": True},
+             "usage": {"input_tokens": 1, "output_tokens": 1}}),
+            stderr="", returncode=0)
+    monkeypatch.setattr(f"{MOD}.subprocess.run", once)
+    AntigravityProvider(model="m", json_schema="{}").ask("hi")
+    assert len(calls) == 1
+
+
+def test_no_schema_means_no_retry_on_empty(monkeypatch, installed):
+    monkeypatch.setattr(f"{MOD}.subprocess.run", run_returns(stdout=json.dumps(
+        {"status": "SUCCESS", "response": "", "usage": {}})))
+    assert AntigravityProvider(model="m").ask("hi").text == ""

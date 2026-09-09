@@ -180,6 +180,25 @@ class Planner(Agent):
             if not domain or c.domain in (domain, "general"))
         schema = ('{"name": str, "description": str, "steps": '
                   '[{"id": str, "capability": str, "with": {port: value}, "needs": [str]}]}')
+        # Shape the planner actually wants back, enforced where the provider
+        # supports it and used as documentation where it does not.
+        wf_schema = {
+            "type": "object",
+            "required": ["name", "steps"],
+            "properties": {
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+                "steps": {"type": "array", "items": {
+                    "type": "object",
+                    "required": ["id", "capability"],
+                    "properties": {
+                        "id": {"type": "string"},
+                        "capability": {"type": "string"},
+                        "with": {"type": "object"},
+                        "needs": {"type": "array", "items": {"type": "string"}},
+                    }}},
+            },
+        }
         try:
             raw = self.think_json(
                 f"Goal: {goal}\n\nProduce a workflow matching this schema:\n{schema}\n"
@@ -187,7 +206,8 @@ class Planner(Agent):
                 f"Use only capabilities from the catalogue. Reference earlier outputs "
                 f"as {{{{ steps.<id>.outputs.<port> }}}} and run parameters as "
                 f"{{{{ params.<name> }}}}.",
-                context=f"# Installed capabilities\n{catalogue}")
+                context=f"# Installed capabilities\n{catalogue}",
+                schema=wf_schema)
         except (ProviderUnavailable, ValueError):
             return None
         wf = self._validate_workflow(raw)

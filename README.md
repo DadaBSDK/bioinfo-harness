@@ -209,11 +209,26 @@ rejected key or unknown model is permanent and does.
 bioharness staff hire nova --role planner --provider antigravity --model gemini-3.8-flash-low
 ```
 
+Point the whole roster at one backend without losing anyone's memory:
+
+```bash
+bioharness staff assign --provider antigravity --model gemini-3.8-flash-low
+bioharness staff assign planner ada --provider antigravity --model gemini-3.8-flash-high
+```
+
 `agy` gets a dedicated provider rather than the generic CLI wrapper, because
 `--output-format json` returns real token usage — input, output, thinking and
 cache reads — instead of a character-count estimate, and because one credential
 fronts several model families (Gemini 3.x, Claude Sonnet/Opus 4.6, GPT-OSS).
 The CLI authenticates itself; the harness never touches that credential.
+
+Two quirks the harness absorbs. With `--json-schema` the validated object comes
+back in `structured_output`, and `response` may be empty or hold fenced prose —
+the structured field wins. And the `-medium`/`-high` tiers sometimes finish a
+schema-constrained turn agentically and emit nothing at all, burning real
+thinking tokens; an empty reply is retried once without the schema. That second
+call is why a high-tier planner costs roughly twice a low-tier one — `-low`
+answers the schema directly and is the better default for planning.
 
 **A Gemini API key is not an Antigravity key.** Google retired the standalone
 Gemini CLI in June 2026 in favour of the Antigravity CLI, which authenticates
@@ -344,7 +359,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 180 passed
+pytest -q     # 188 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

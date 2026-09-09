@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -72,21 +73,33 @@ def _explain(exc: urllib.error.HTTPError) -> str:
     return f"Gemini API error {exc.code}: {message or exc.reason}"
 
 
-def available_models(key: str = "", timeout: float = 10.0) -> list[str]:
-    """Models this key may actually call generateContent on."""
+_CACHE: dict[str, Any] = {"models": None, "at": 0.0, "key": ""}
+CACHE_TTL = 300.0
+
+
+def available_models(key: str = "", timeout: float = 10.0,
+                     refresh: bool = False) -> list[str]:
+    """Models this key may actually call generateContent on. Cached briefly:
+    the dashboard asks on every poll and this is a network round trip."""
     key = key or api_key()
     if not key:
         return []
+    if (not refresh and _CACHE["models"] is not None and _CACHE["key"] == key
+            and time.time() - _CACHE["at"] < CACHE_TTL):
+        return _CACHE["models"]
     try:
         data = _request(f"{API_ROOT}/models?pageSize=200", None, timeout, key)
     except (urllib.error.URLError, OSError, json.JSONDecodeError, TimeoutError):
+        _CACHE.update(models=[], at=time.time(), key=key)
         return []
     out = []
     for m in data.get("models", []):
         if "generateContent" not in (m.get("supportedGenerationMethods") or []):
             continue
         out.append(str(m.get("name", "")).removeprefix("models/"))
-    return sorted(n for n in out if n)
+    models = sorted(n for n in out if n)
+    _CACHE.update(models=models, at=time.time(), key=key)
+    return models
 
 
 @dataclass
@@ -200,3 +213,30 @@ class GeminiProvider:
             # usage without inventing a cost.
             usd=0.0,
         )
+
+
+def peek_models() -> list[str] | None:
+    """Whatever is cached, without spawning anything. None means not yet known."""
+    return _CACHE["models"]
+
+
+def warm_models() -> None:
+    """Refresh the cache in the background.
+
+    The dashboard polls every few seconds and listing models is slow (a CLI
+    spawn or a network round trip). Blocking the request on it makes the whole
+    panel feel broken, so the endpoint reads the cache and this fills it.
+    """
+    if _CACHE.get("warming"):
+        return
+    _CACHE["warming"] = True
+
+    def run() -> None:
+        try:
+            available_models(refresh=True)
+        except Exception:  # noqa: BLE001 - a warm-up must never take the server down
+            pass
+        finally:
+            _CACHE["warming"] = False
+
+    threading.Thread(target=run, daemon=True).start()

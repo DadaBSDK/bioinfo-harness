@@ -28,6 +28,15 @@ def no_ambient_key(monkeypatch):
         monkeypatch.delenv(var, raising=False)
 
 
+@pytest.fixture(autouse=True)
+def clear_cache():
+    """The model listing is cached; each test starts cold."""
+    from bioharness.agents import gemini_provider as gp
+    gp._CACHE.update(models=None, at=0.0, key="")
+    yield
+    gp._CACHE.update(models=None, at=0.0, key="")
+
+
 def http_error(code: int, message: str) -> urllib.error.HTTPError:
     body = json.dumps({"error": {"message": message}}).encode()
     return urllib.error.HTTPError("u", code, "err", {}, BytesIO(body))

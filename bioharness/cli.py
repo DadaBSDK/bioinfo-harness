@@ -253,10 +253,25 @@ def cmd_staff(args: argparse.Namespace) -> int:
             print("nobody hired yet. Try: bioharness staff hire ada --role planner")
             return 0
         print(color(f"{'NAME':<14}{'ROLE':<12}{'PROVIDER':<14}"
-                    f"{'MODEL':<24}AUTONOMY", "bold"))
+                    f"{'MODEL':<26}AUTONOMY", "bold"))
         for a in roster:
             print(f"{a['name']:<14}{a.get('role',''):<12}{a.get('provider',''):<14}"
-                  f"{(a.get('model') or '-') + '  ':<24}{a.get('autonomy','-')}")
+                  f"{(a.get('model') or '-') + '  ':<26}{a.get('autonomy','-')}")
+        return 0
+
+    if args.staff_cmd == "assign":
+        roster = dash.hive().roster()
+        names = args.names or [a["name"] for a in roster
+                               if a.get("role") != "operator"]
+        result = dash.assign(names, args.provider, args.model or "", args.autonomy or "")
+        if not result.get("ok"):
+            print(color(f"error: {result['error']}", "red"))
+            return 1
+        target = args.provider + (f"/{args.model}" if args.model else "")
+        print(color(f"pointed {len(result['changed'])} agent(s) at {target}: "
+                    f"{', '.join(result['changed'])}", "green"))
+        if result.get("missing"):
+            print(color(f"not on the roster: {', '.join(result['missing'])}", "yellow"))
         return 0
 
     if args.staff_cmd == "hire":
@@ -420,6 +435,16 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--autonomy", default="bounded",
                     choices=["read_only", "suggest", "bounded", "full"])
     sh.set_defaults(func=cmd_staff)
+    sa = ssub.add_parser("assign",
+                         help="point existing agents at a different provider, "
+                              "keeping their memory")
+    sa.add_argument("names", nargs="*", help="agent names; omit for everyone")
+    sa.add_argument("--provider", required=True)
+    sa.add_argument("--model", default="")
+    sa.add_argument("--autonomy", default="",
+                    choices=["", "read_only", "suggest", "bounded", "full"])
+    sa.set_defaults(func=cmd_staff)
+
     sf = ssub.add_parser("fire", help="dismiss an agent (its memory is archived)")
     sf.add_argument("name")
     sf.set_defaults(func=cmd_staff)

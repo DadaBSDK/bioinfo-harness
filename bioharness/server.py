@@ -147,17 +147,23 @@ class Dashboard:
         """What the hire form may offer, and whether each backend works here."""
         from .agents.api_provider import MODELS, APIProvider
         from .agents.base import PROVIDERS, CLIProvider
-        from .agents.antigravity_provider import (AntigravityProvider,
-                                                  available_models as agy_models)
-        from .agents.gemini_provider import GeminiProvider, available_models
+        from .agents import antigravity_provider as agy_mod
+        from .agents import gemini_provider as gem_mod
+        from .agents.antigravity_provider import AntigravityProvider
+        from .agents.gemini_provider import GeminiProvider
         from .agents.local_provider import OllamaProvider, installed_models
         api = APIProvider()
         local_models = installed_models()
         ollama = OllamaProvider()
         gem = GeminiProvider()
-        gem_models = available_models()
         agy = AntigravityProvider()
-        agy_list = agy_models()
+        # Model discovery is slow, so serve whatever is cached and refresh
+        # behind the request rather than making the panel wait for a CLI spawn.
+        gem_mod.warm_models()
+        agy_mod.warm_models()
+        gem_models = gem_mod.peek_models() or []
+        agy_list = agy_mod.peek_models() or []
+        discovering = (gem_mod.peek_models() is None or agy_mod.peek_models() is None)
         providers = [{"id": "builtin", "label": "builtin (deterministic, free)",
                       "available": True, "reason": "no LLM calls", "models": []},
                      {"id": "claude-api", "label": "Claude API",
@@ -167,12 +173,14 @@ class Dashboard:
                      {"id": "gemini-api", "label": "Gemini API",
                       "available": bool(gem_models),
                       "reason": (f"{len(gem_models)} model(s)" if gem_models
-                                 else gem.unavailable_reason()),
+                                 else ("discovering models…" if discovering
+                                       else gem.unavailable_reason())),
                       "models": gem_models},
                      {"id": "antigravity", "label": "Antigravity CLI (agy)",
                       "available": bool(agy_list),
                       "reason": (f"{len(agy_list)} model(s)" if agy_list
-                                 else agy.unavailable_reason()),
+                                 else ("discovering models…" if discovering
+                                       else agy.unavailable_reason())),
                       "models": agy_list},
                      {"id": "ollama", "label": "Ollama (local, free)",
                       "available": bool(local_models),
@@ -240,6 +248,38 @@ class Dashboard:
         hive.event("agent.hired", {"name": name, "role": role,
                                    "provider": provider, "model": model})
         return {"ok": True, "agent": identity}
+
+    def assign(self, names: list[str], provider: str, model: str = "",
+               autonomy: str = "") -> dict[str, Any]:
+        """Point one or more existing agents at a different backend."""
+        opts = self.staff_options()
+        known = {p["id"] for p in opts["providers"]}
+        if provider not in known:
+            return {"ok": False, "error": f"unknown provider {provider!r}"}
+        if autonomy and autonomy not in opts["autonomy"]:
+            return {"ok": False, "error": f"unknown autonomy {autonomy!r}"}
+        offered = next((p["models"] for p in opts["providers"]
+                        if p["id"] == provider), [])
+        if model and offered and model not in offered:
+            return {"ok": False,
+                    "error": f"model {model!r} is not offered by {provider}"}
+
+        hive = self.hive()
+        roster = {a["name"]: a for a in hive.roster()}
+        targets = [n for n in names if n in roster]
+        missing = [n for n in names if n not in roster]
+        changed = []
+        for name in targets:
+            # An operator is the human at the door, not a worker; leave it be.
+            if roster[name].get("role") == "operator":
+                continue
+            if hive.retarget(name, provider=provider,
+                             model=model if provider != "builtin" else "",
+                             autonomy=autonomy or None):
+                changed.append(name)
+        return {"ok": bool(changed), "changed": changed, "missing": missing,
+                "provider": provider, "model": model,
+                "error": ("no agent was changed" if not changed else "")}
 
     def fire(self, name: str) -> dict[str, Any]:
         if not self.NAME_OK.match(name or ""):
@@ -436,7 +476,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlparse(self.path)
         route = parsed.path
-        if route not in ("/api/message", "/api/staff/hire", "/api/staff/fire"):
+        if route not in ("/api/message", "/api/staff/hire", "/api/staff/fire",
+                         "/api/staff/assign"):
             return self._send_json({"error": "no such endpoint"}, status=404)
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -454,6 +495,12 @@ class Handler(BaseHTTPRequestHandler):
                 provider=str(payload.get("provider", "builtin")),
                 model=str(payload.get("model", "")),
                 autonomy=str(payload.get("autonomy", "bounded")))
+        elif route == "/api/staff/assign":
+            result = self.dash.assign(
+                names=list(payload.get("names") or []),
+                provider=str(payload.get("provider", "")),
+                model=str(payload.get("model", "")),
+                autonomy=str(payload.get("autonomy", "")))
         else:
             result = self.dash.fire(str(payload.get("name", "")))
         return self._send_json(result, status=200 if result.get("ok") else 400)
