@@ -147,6 +147,8 @@ class Dashboard:
         """What the hire form may offer, and whether each backend works here."""
         from .agents.api_provider import MODELS, APIProvider
         from .agents.base import PROVIDERS, CLIProvider
+        from .agents.antigravity_provider import (AntigravityProvider,
+                                                  available_models as agy_models)
         from .agents.gemini_provider import GeminiProvider, available_models
         from .agents.local_provider import OllamaProvider, installed_models
         api = APIProvider()
@@ -154,6 +156,8 @@ class Dashboard:
         ollama = OllamaProvider()
         gem = GeminiProvider()
         gem_models = available_models()
+        agy = AntigravityProvider()
+        agy_list = agy_models()
         providers = [{"id": "builtin", "label": "builtin (deterministic, free)",
                       "available": True, "reason": "no LLM calls", "models": []},
                      {"id": "claude-api", "label": "Claude API",
@@ -165,6 +169,11 @@ class Dashboard:
                       "reason": (f"{len(gem_models)} model(s)" if gem_models
                                  else gem.unavailable_reason()),
                       "models": gem_models},
+                     {"id": "antigravity", "label": "Antigravity CLI (agy)",
+                      "available": bool(agy_list),
+                      "reason": (f"{len(agy_list)} model(s)" if agy_list
+                                 else agy.unavailable_reason()),
+                      "models": agy_list},
                      {"id": "ollama", "label": "Ollama (local, free)",
                       "available": bool(local_models),
                       "reason": (f"{len(local_models)} model(s) local"
@@ -194,10 +203,16 @@ class Dashboard:
         if role not in self.ROLES_AVAILABLE:
             return {"ok": False, "error": f"unknown role {role!r}; "
                                           f"pick one of {list(self.ROLES_AVAILABLE)}"}
-        if provider not in ("builtin", "claude-api", "gemini-api", "ollama", *PROVIDERS):
+        if provider not in ("builtin", "claude-api", "gemini-api", "ollama",
+                            "antigravity", *PROVIDERS):
             return {"ok": False, "error": f"unknown provider {provider!r}"}
         if provider == "claude-api" and model and model not in MODELS:
             return {"ok": False, "error": f"unknown model {model!r}"}
+        if provider == "antigravity":
+            from .agents.antigravity_provider import available_models as _agy
+            usable = _agy()
+            if model and usable and model not in usable:
+                return {"ok": False, "error": f"model {model!r} is not offered by agy"}
         if provider == "gemini-api":
             usable = available_models()
             if model and usable and model not in usable:
@@ -218,7 +233,8 @@ class Dashboard:
 
         # A model only means something for the API provider; storing one for a
         # builtin or CLI agent just makes the roster lie about what it runs.
-        model = model if provider in ("claude-api", "gemini-api", "ollama") else ""
+        model = model if provider in ("claude-api", "gemini-api", "ollama",
+                                      "antigravity") else ""
         identity = hive.enroll(name, role, provider=provider,
                                model=model, autonomy=autonomy)
         hive.event("agent.hired", {"name": name, "role": role,

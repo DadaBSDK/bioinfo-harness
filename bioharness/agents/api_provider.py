@@ -171,6 +171,7 @@ class APIProvider:
 def make_provider(kind: str, model: str | None = None, **kw: Any) -> Any:
     """Build a provider by name: `claude-api`, `ollama`, or any CLI provider."""
     from .base import CLIProvider, PROVIDERS
+    from .antigravity_provider import AntigravityProvider
     from .gemini_provider import GeminiProvider
     from .local_provider import DEFAULT_MODEL as LOCAL_MODEL, OllamaProvider
     if kind in ("claude-api", "api", "anthropic"):
@@ -179,6 +180,9 @@ def make_provider(kind: str, model: str | None = None, **kw: Any) -> Any:
     if kind in ("ollama", "local"):
         kw.pop("effort", None)
         return OllamaProvider(model=model or LOCAL_MODEL, **kw)
+    if kind in ("antigravity", "agy"):
+        return AntigravityProvider(model=model or "",
+                                   effort=kw.pop("effort", "") or "", **kw)
     if kind in ("gemini-api", "google"):
         kw.pop("effort", None)
         return GeminiProvider(model=model or "", **kw)

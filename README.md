@@ -168,6 +168,7 @@ work the same mission. `--roles` overrides the roster for one run.
 | `builtin` | Deterministic logic — type-graph planning, path/type curation, QC gates | free |
 | `claude-api` | The Anthropic Messages API via the official SDK | metered, real usage |
 | `gemini-api` | Google's Gemini API with an AI Studio key | metered; tokens recorded, dollars not priced |
+| `antigravity` | The Antigravity CLI (`agy`), which fronts Gemini, Claude and GPT-OSS | your Antigravity plan |
 | `ollama` | A model running locally through Ollama | free; nothing leaves the machine |
 | `claude`, `codex`, `gemini`, `qwen`, … | An agent CLI you already have logged in | your subscription |
 
@@ -201,6 +202,18 @@ answer routinely carries ~190 thinking tokens, so ignoring them would
 under-report usage by an order of magnitude. Overload and rate-limit responses
 (429, 5xx) are retried with backoff and do not take the agent offline; a
 rejected key or unknown model is permanent and does.
+
+### Antigravity
+
+```bash
+bioharness staff hire nova --role planner --provider antigravity --model gemini-3.8-flash-low
+```
+
+`agy` gets a dedicated provider rather than the generic CLI wrapper, because
+`--output-format json` returns real token usage — input, output, thinking and
+cache reads — instead of a character-count estimate, and because one credential
+fronts several model families (Gemini 3.x, Claude Sonnet/Opus 4.6, GPT-OSS).
+The CLI authenticates itself; the harness never touches that credential.
 
 **A Gemini API key is not an Antigravity key.** Google retired the standalone
 Gemini CLI in June 2026 in favour of the Antigravity CLI, which authenticates
@@ -331,7 +344,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 163 passed
+pytest -q     # 180 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

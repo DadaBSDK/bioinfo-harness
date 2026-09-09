@@ -27,10 +27,9 @@ PROVIDERS: dict[str, list[str]] = {
     "claude":   ["claude", "-p"],
     "codex":    ["codex", "exec"],
     # Google retired the standalone Gemini CLI in June 2026 in favour of the
-    # Antigravity CLI, which authenticates with its own AV_API_KEY rather than
-    # a Gemini API key. Both are kept; for a Gemini API key use `gemini-api`.
+    # Antigravity CLI. `agy` has its own provider (antigravity_provider) rather
+    # than a generic wrapper, because it reports real token usage.
     "gemini":   ["gemini", "-p"],
-    "antigravity": ["agy", "-p"],
     "qwen":     ["qwen", "-p"],
     "opencode": ["opencode", "run"],
     "crush":    ["crush", "run"],

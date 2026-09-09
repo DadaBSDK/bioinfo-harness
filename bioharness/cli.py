@@ -188,10 +188,26 @@ def cmd_mission(args: argparse.Namespace) -> int:
             names.append(ident["name"])
         print(color(f"staffed from the hive: {', '.join(names)}", "dim"))
 
-    first = next((a.name for a in agents if a.role == "pi"), agents[0].name)
+    # Send the kickoff to someone who actually subscribes to it. A PI is the
+    # natural recipient; a planner can start a mission on its own. Silently
+    # mailing "goal" to an agent that does not listen for it looks exactly like
+    # a mission that ran and found nothing.
+    body = dict(goal=args.goal, start_type=args.from_type,
+                goal_type=args.to_type, domain=args.domain)
+    pi = next((a for a in agents if a.role == "pi"), None)
+    if pi is not None:
+        first, topic = pi.name, "goal"
+    else:
+        planner = next((a for a in agents if a.role == "planner"), None)
+        if planner is None:
+            print(color("no agent can receive a mission: hire a pi (or a planner).\n"
+                        "  bioharness staff hire chief --role pi", "red"))
+            return 1
+        first, topic = planner.name, "plan.request"
+        print(color(f"no pi on the roster; starting at {first}", "yellow"))
+
     mission = Mission(hive, agents, rails, max_rounds=args.max_rounds)
-    mission.kickoff(first, "goal", goal=args.goal, start_type=args.from_type,
-                    goal_type=args.to_type, domain=args.domain)
+    mission.kickoff(first, topic, **body)
     result = mission.run()
     print(dumps(result))
     return 0
@@ -236,10 +252,11 @@ def cmd_staff(args: argparse.Namespace) -> int:
         if not roster:
             print("nobody hired yet. Try: bioharness staff hire ada --role planner")
             return 0
-        print(color(f"{'NAME':<14}{'ROLE':<12}{'PROVIDER':<14}{'MODEL':<20}AUTONOMY", "bold"))
+        print(color(f"{'NAME':<14}{'ROLE':<12}{'PROVIDER':<14}"
+                    f"{'MODEL':<24}AUTONOMY", "bold"))
         for a in roster:
             print(f"{a['name']:<14}{a.get('role',''):<12}{a.get('provider',''):<14}"
-                  f"{a.get('model') or '-':<20}{a.get('autonomy','-')}")
+                  f"{(a.get('model') or '-') + '  ':<24}{a.get('autonomy','-')}")
         return 0
 
     if args.staff_cmd == "hire":
@@ -305,6 +322,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     detail = (f"{len(gem)} model(s), e.g. {', '.join(gem[:3])}" if gem
               else GeminiProvider().unavailable_reason())
     print(f"  {mark} gemini-api          {color(detail, 'dim')}")
+    from .agents.antigravity_provider import (AntigravityProvider,
+                                              available_models as agy_models)
+    agy = agy_models()
+    mark = color("✓", "green") if agy else color("✗", "red")
+    detail = (f"{len(agy)} model(s), e.g. {', '.join(agy[:3])}" if agy
+              else AntigravityProvider().unavailable_reason())
+    print(f"  {mark} antigravity         {color(detail, 'dim')}")
     from .agents.local_provider import OllamaProvider, installed_models
     local = installed_models()
     mark = color("✓", "green") if local else color("✗", "red")
@@ -390,7 +414,8 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("name")
     sh.add_argument("--role", required=True, choices=sorted(ROLES))
     sh.add_argument("--provider", default="builtin",
-                    help="builtin | claude-api | gemini-api | ollama | a CLI name")
+                    help="builtin | claude-api | gemini-api | antigravity | "
+                         "ollama | a CLI name")
     sh.add_argument("--model", default="", help=f"for claude-api: {', '.join(MODELS)}")
     sh.add_argument("--autonomy", default="bounded",
                     choices=["read_only", "suggest", "bounded", "full"])
