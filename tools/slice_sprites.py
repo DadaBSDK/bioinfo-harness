@@ -39,6 +39,18 @@ SHEETS: dict[str, dict] = {
         "max": 30,
         "kind": "sprite",
     },
+    # The wall row sits on a dark background rather than the magenta field, so
+    # blob detection cannot separate its cells -- it gets a fixed-grid pass.
+    "walls_props.png": {
+        "strip": {"box": (0, 5, 1024, 195), "cells": 5, "size": (64, 60),
+                  "names": ["wall_run", None, "wall_corner_l", "wall_corner_r", "wall_door"]},
+        "below": 200,
+        "names": ["pcr", "incubator", "freezer", "gel_dock", "sink", "shelving",
+                  "filing_cabinet", "printer", "table", "sofa", "water_cooler", "clock",
+                  *[None] * 12],          # the generator repeated the last two rows
+        "max": 34,
+        "kind": "sprite",
+    },
     "tiles.png": {
         "names": ["floor_lino", "floor_tile", "floor_grate",
                   "floor_wood", None, "wall_skirting",
@@ -137,8 +149,31 @@ def flatten(img: Image.Image, colors: int = 24) -> Image.Image:
     return out
 
 
+def extract_strip(img: Image.Image, strip: dict) -> dict[str, Image.Image]:
+    """Slice a row of equal-width cells at fixed positions."""
+    x0, y0, x1, y1 = strip["box"]
+    band = img.crop((x0, y0, x1, y1))
+    n = strip["cells"]
+    step = band.width / n
+    out: dict[str, Image.Image] = {}
+    for i, name in enumerate(strip["names"]):
+        if name is None:
+            continue
+        cell = band.crop((round(i * step), 0, round((i + 1) * step), band.height))
+        # Trim the dividing rules the generator drew between cells. These must
+        # go entirely: any remnant becomes a repeating seam once the wall tiles.
+        cell = cell.crop((9, 0, cell.width - 9, cell.height))
+        out[name] = flatten(cell.resize(strip["size"], Image.BOX))
+    return out
+
+
 def extract(path: Path, spec: dict) -> dict[str, Image.Image]:
     img = key_magenta(Image.open(path))
+    sprites_extra: dict[str, Image.Image] = {}
+    if "strip" in spec:
+        sprites_extra = extract_strip(img, spec["strip"])
+    if "below" in spec:
+        img = img.crop((0, spec["below"], img.width, img.height))
     mask_img = img.getchannel("A").point(lambda a: 255 if a > 100 else 0)
     grouped = mask_img.filter(ImageFilter.MaxFilter(JOIN_RADIUS))
     boxes = reading_order(components(np.asarray(grouped) > 0))
@@ -169,6 +204,7 @@ def extract(path: Path, spec: dict) -> dict[str, Image.Image]:
         if spec["kind"] == "sprite":
             crop = erode_alpha(crop)
         sprites[name] = flatten(crop.resize(target, Image.BOX))
+    sprites.update(sprites_extra)
     return sprites
 
 
@@ -207,8 +243,14 @@ def main() -> None:
     (OUT / "atlas.json").write_text(json.dumps({
         "image": "/assets/atlas.png",
         "frames": frames,
-        "tiles": [n for n in frames if n.startswith(("floor_", "wall_"))],
-        "characters": [n for n in frames if n.startswith("char_")],
+        # Categories the renderer reads. "tiles" are the 32x32 repeating
+        # surfaces; the wall run/door pieces are a different size and shape and
+        # are drawn as a band, so they are catalogued separately.
+        "tiles": sorted(n for n, f in frames.items()
+                        if f["w"] == 32 and f["h"] == 32),
+        "walls": sorted(n for n in frames
+                        if n.startswith(("wall_run", "wall_door", "wall_corner"))),
+        "characters": sorted(n for n in frames if n.startswith("char_")),
     }, indent=2, sort_keys=True))
     print(f"\natlas {atlas.size} with {len(frames)} frames -> {OUT / 'atlas.png'}")
 

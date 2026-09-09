@@ -64,24 +64,34 @@ def test_every_sprite_the_ui_asks_for_exists(atlas):
     referenced |= set(re.findall(r"'(char_[a-z_]+)'", js))
     referenced |= set(re.findall(r"'(floor_[a-z_]+)'", js))
     referenced |= set(re.findall(r"'(wall_[a-z_]+)'", js))
-    for props in re.findall(r"props:\s*\[([^\]]*)\]", js):
-        referenced |= set(re.findall(r"'([a-z_]+)'", props))
+    for key in ("wall", "floorProps"):
+        for block in re.findall(rf"{key}:\s*\[(.*?)\],?\s*\}}", js, re.S):
+            referenced |= set(re.findall(r"'([a-z_]+)'", block))
 
     assert referenced, "found no sprite references in app.js — did the scrape break?"
     missing = sorted(referenced - frames)
     assert not missing, f"app.js references sprites missing from the atlas: {missing}"
 
 
-def test_characters_and_tiles_are_catalogued(atlas):
+def test_characters_tiles_and_walls_are_catalogued(atlas):
     assert len(atlas["characters"]) >= 6
-    assert all(t.startswith(("floor_", "wall_")) for t in atlas["tiles"])
     assert "floor_lino" in atlas["tiles"]        # the renderer's fallback tile
+    assert "wall_run" in atlas["walls"] and "wall_door" in atlas["walls"]
+    # Wall pieces are drawn as a band, never as a 32px tile.
+    assert not set(atlas["walls"]) & set(atlas["tiles"])
 
 
 def test_tiles_are_square_and_uniform(atlas):
-    sizes = {atlas["frames"][t]["w"] for t in atlas["tiles"]}
-    assert sizes == {32}, f"tiles must all be 32px, got {sizes}"
-    assert all(atlas["frames"][t]["h"] == 32 for t in atlas["tiles"])
+    """Repeating floor tiles must be exactly 32px or they will not tile."""
+    for t in atlas["tiles"]:
+        f = atlas["frames"][t]
+        assert (f["w"], f["h"]) == (32, 32), f"{t} is {f['w']}x{f['h']}, not 32x32"
+
+
+def test_wall_pieces_share_one_size(atlas):
+    """drawWall tiles the run and swaps in the door, so both must match."""
+    sizes = {(atlas["frames"][w]["w"], atlas["frames"][w]["h"]) for w in atlas["walls"]}
+    assert len(sizes) == 1, f"wall pieces disagree on size: {sizes}"
 
 
 def test_ui_assets_are_reachable_by_the_server():

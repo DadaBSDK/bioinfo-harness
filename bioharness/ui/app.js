@@ -35,8 +35,9 @@ async function api(path, options) {
 // The lab floor -- pixel art on a canvas, labels on an SVG layer above it
 // ==========================================================================
 const TILE = 32;
-const COLS = 24, ROWS = 16;
-const FW = COLS * TILE, FH = ROWS * TILE;
+const FW = 832, FH = 576;   // tall enough for reception's name plates
+const SCALE = 1.5;            // sprites are ~34px native; 1.5x reads at this size
+const WALL_H = 60, WALL_W = 64;
 
 const ATLAS = { img: null, frames: null, ready: false };
 
@@ -49,31 +50,51 @@ async function loadAtlas() {
     ATLAS.img = img; ATLAS.frames = idx.frames; ATLAS.ready = true;
     paintCanvas();          // the first tick may have run before this resolved
   } catch {
-    ATLAS.ready = false;      // fall back to the flat vector floor
+    ATLAS.ready = false;    // the floor simply stays empty rather than erroring
   }
 }
 
-// Rooms in tile coordinates. `floor` and `props` decide what the room looks
-// like; `roles` decides who works there.
-const ZONES = [
-  { id: 'planning',  label: 'PLANNING OFFICE', x: 1,  y: 1,  w: 7, h: 5,
-    floor: 'floor_wood',  props: ['desk_pc', 'desk_pc', 'whiteboard'], roles: ['pi', 'planner'] },
-  { id: 'seq',       label: 'SEQUENCING BAY',  x: 9,  y: 1,  w: 7, h: 5,
-    floor: 'floor_tile',  props: ['sequencer', 'sequencer', 'bench'],  roles: ['curator'] },
-  { id: 'qc',        label: 'QC BENCH',        x: 17, y: 1,  w: 6, h: 5,
-    floor: 'floor_tile',  props: ['microscope', 'centrifuge'],         roles: ['validator'] },
-  { id: 'compute',   label: 'COMPUTE CLUSTER', x: 1,  y: 7,  w: 7, h: 5,
-    floor: 'floor_grate', props: ['server_rack', 'server_rack', 'server_rack', 'server_rack'],
-    roles: ['runner', 'orchestrator'] },
-  { id: 'structure', label: 'STRUCTURE LAB',   x: 9,  y: 7,  w: 7, h: 5,
-    floor: 'floor_lino',  props: ['fume_hood', 'flask_rack', 'microscope'], roles: ['analyst'] },
-  { id: 'writeup',   label: 'WRITE-UP DESK',   x: 17, y: 7,  w: 6, h: 5,
-    floor: 'floor_wood',  props: ['desk_pc', 'whiteboard'],            roles: ['scribe'] },
-  { id: 'reception', label: 'RECEPTION',       x: 1,  y: 13, w: 22, h: 3,
-    floor: 'floor_lino',  props: ['door', 'plant', 'chair', 'plant'],  roles: ['operator'] },
+// Rooms are pixel rects inside one continuous building. `wall` props line the
+// back wall, `floor` props stand out on the floor, and `roles` decides who
+// works here. Everything else -- corridor, walls, doors -- is derived.
+const ROOMS = [
+  { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 256, h: 168,
+    tile: 'floor_wood', roles: ['pi', 'planner'],
+    wall: ['desk_pc', 'desk_pc', 'whiteboard', 'filing_cabinet'],
+    floorProps: [['table', 0.30, 0.92], ['chair', 0.66, 0.90]] },
+
+  { id: 'seq', label: 'SEQUENCING BAY', x: 288, y: 72, w: 256, h: 168,
+    tile: 'floor_tile', roles: ['curator'],
+    wall: ['sequencer', 'pcr', 'incubator', 'freezer'],
+    floorProps: [['bench', 0.30, 0.94], ['sink', 0.72, 0.92]] },
+
+  { id: 'qc', label: 'QC BENCH', x: 560, y: 72, w: 256, h: 168,
+    tile: 'floor_tile', roles: ['validator'],
+    wall: ['microscope', 'centrifuge', 'gel_dock', 'shelving'],
+    floorProps: [['bench', 0.34, 0.94], ['flask_rack', 0.72, 0.92]] },
+
+  { id: 'compute', label: 'COMPUTE CLUSTER', x: 16, y: 320, w: 256, h: 160,
+    tile: 'floor_grate', roles: ['runner', 'orchestrator'],
+    wall: ['server_rack', 'server_rack', 'server_rack', 'server_rack'],
+    floorProps: [['desk_pc', 0.34, 0.94], ['printer', 0.72, 0.92]] },
+
+  { id: 'structure', label: 'STRUCTURE LAB', x: 288, y: 320, w: 256, h: 160,
+    tile: 'floor_lino', roles: ['analyst'],
+    wall: ['fume_hood', 'gel_dock', 'shelving', 'incubator'],
+    floorProps: [['bench', 0.32, 0.94], ['microscope', 0.72, 0.93]] },
+
+  { id: 'writeup', label: 'WRITE-UP DESK', x: 560, y: 320, w: 256, h: 160,
+    tile: 'floor_wood', roles: ['scribe'],
+    wall: ['desk_pc', 'whiteboard', 'filing_cabinet', 'clock'],
+    floorProps: [['sofa', 0.32, 0.94], ['plant', 0.76, 0.93]] },
+
+  // Reception has no back wall: it is the corridor the other rooms open onto.
+  { id: 'reception', label: 'RECEPTION', x: 16, y: 508, w: 800, h: 44,
+    tile: null, roles: ['operator'], wall: [],
+    floorProps: [['water_cooler', 0.09, 1.0], ['plant', 0.30, 1.0],
+                 ['sofa', 0.52, 1.0], ['plant', 0.74, 1.0], ['chair', 0.92, 1.0]] },
 ];
 
-// Which sprite plays which role. Anyone unrecognised still gets a body.
 const ROLE_SPRITE = {
   pi: 'char_senior', planner: 'char_tablet', curator: 'char_goggles',
   validator: 'char_pipette', analyst: 'char_curly', scribe: 'char_hijab',
@@ -82,47 +103,79 @@ const ROLE_SPRITE = {
 const SPRITE_POOL = ['char_hoodie', 'char_casual', 'char_curly', 'char_tablet'];
 const spriteFor = a => ROLE_SPRITE[a.role] || SPRITE_POOL[hue(a.name) % SPRITE_POOL.length];
 
-function slots(zone) {
-  const n = zone.id === 'reception' ? 6 : 3;
-  const step = (zone.w * TILE) / n;
-  // Stand one row up from the back of the room: the last row is left free for
-  // the name plate, which otherwise falls off the bottom of the canvas.
-  const y = (zone.y + zone.h - 2) * TILE;
-  return Array.from({ length: n }, (_, i) =>
-    ({ x: zone.x * TILE + step * (i + 0.5), y }));
+function slots(room) {
+  const n = room.id === 'reception' ? 6 : 3;
+  const step = room.w / n;
+  // Stand in the lower half of the room, clear of the equipment along the wall.
+  const y = room.y + room.h - (room.id === 'reception' ? 4 : 28);
+  return Array.from({ length: n }, (_, i) => ({ x: room.x + step * (i + 0.5), y }));
 }
 
 function seat(agents) {
   const taken = {}, placed = {};
-  ZONES.forEach(z => (taken[z.id] = 0));
-  const zoneFor = role => ZONES.find(z => z.roles.includes(role)) ||
-                          ZONES.find(z => z.id === 'reception');
+  ROOMS.forEach(r => (taken[r.id] = 0));
+  const roomFor = role => ROOMS.find(r => r.roles.includes(role)) ||
+                          ROOMS.find(r => r.id === 'reception');
   agents.forEach(a => {
-    const z = zoneFor(a.role);
-    const free = slots(z);
-    placed[a.name] = { ...free[Math.min(taken[z.id]++, free.length - 1)],
-                       zone: z.id, agent: a };
+    const r = roomFor(a.role);
+    const free = slots(r);
+    placed[a.name] = { ...free[Math.min(taken[r.id]++, free.length - 1)],
+                       room: r.id, agent: a };
   });
   return placed;
 }
 
-function drawSprite(ctx, name, cx, bottom, scale = 1) {
-  const f = ATLAS.frames[name];
+function frame(name) { return ATLAS.frames?.[name]; }
+
+function shadow(ctx, cx, y, w) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.28)';
+  ctx.beginPath();
+  ctx.ellipse(cx, y - 1, Math.max(5, w * 0.42), Math.max(2, w * 0.16), 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawSprite(ctx, name, cx, bottom, scale = SCALE, withShadow = true) {
+  const f = frame(name);
   if (!f) return;
-  const w = f.w * scale, h = f.h * scale;
+  const w = Math.round(f.w * scale), h = Math.round(f.h * scale);
+  if (withShadow) shadow(ctx, cx, bottom, w);
   ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h,
                 Math.round(cx - w / 2), Math.round(bottom - h), w, h);
 }
 
-function fillTiles(ctx, name, x, y, w, h) {
-  const f = ATLAS.frames[name] || ATLAS.frames.floor_lino;
+function tileRect(ctx, name, x, y, w, h) {
+  const f = frame(name);
   if (!f) return;
-  for (let ty = 0; ty < h; ty++) {
-    for (let tx = 0; tx < w; tx++) {
-      ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h,
-                    (x + tx) * TILE, (y + ty) * TILE, TILE, TILE);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, w, h);
+  ctx.clip();
+  for (let ty = y; ty < y + h; ty += TILE) {
+    for (let tx = x; tx < x + w; tx += TILE) {
+      ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h, tx, ty, TILE, TILE);
     }
   }
+  ctx.restore();
+}
+
+function drawWall(ctx, room) {
+  const f = frame('wall_run'), d = frame('wall_door');
+  if (!f) return;
+  const y = room.y - WALL_H;
+  const segments = Math.ceil(room.w / WALL_W);
+  const doorAt = Math.floor(segments / 2);      // one doorway per room, centred
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(room.x, y, room.w, WALL_H);
+  ctx.clip();
+  for (let i = 0; i < segments; i++) {
+    const piece = (i === doorAt && d) ? d : f;
+    ctx.drawImage(ATLAS.img, piece.x, piece.y, piece.w, piece.h,
+                  room.x + i * WALL_W, y, WALL_W, WALL_H);
+  }
+  ctx.restore();
 }
 
 function paintCanvas() {
@@ -132,76 +185,88 @@ function paintCanvas() {
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, FW, FH);
 
+  // Corridor floor everywhere first, so rooms sit in a building rather than
+  // floating in a void -- that emptiness was the worst part of the old floor.
+  tileRect(ctx, 'floor_lino', 0, 0, FW, FH);
+  ctx.fillStyle = 'rgba(0,0,0,0.20)';
+  ctx.fillRect(0, 0, FW, FH);
+
   const agents = state.floor?.agents || [];
   const pos = seat(agents);
-  const staffed = new Set(Object.values(pos).map(p => p.zone));
+  const staffed = new Set(Object.values(pos).map(p => p.room));
 
-  for (const z of ZONES) {
-    ctx.globalAlpha = staffed.has(z.id) ? 1 : 0.55;
-    fillTiles(ctx, 'wall_skirting', z.x, z.y, z.w, 1);          // back wall
-    fillTiles(ctx, z.floor, z.x, z.y + 1, z.w, z.h - 1);        // floor
+  for (const room of ROOMS) {
+    ctx.globalAlpha = staffed.has(room.id) ? 1 : 0.62;
+    if (room.tile) {
+      drawWall(ctx, room);
+      tileRect(ctx, room.tile, room.x, room.y, room.w, room.h);
+      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(room.x + 0.5, room.y + 0.5, room.w - 1, room.h - 1);
+    }
 
-    // Equipment stands against the back wall.
-    const props = z.props || [];
-    const step = (z.w * TILE) / (props.length + 1);
-    props.forEach((prop, i) => {
-      drawSprite(ctx, prop, z.x * TILE + step * (i + 1), (z.y + 2) * TILE);
+    // Equipment stands against the back wall...
+    const wall = room.wall || [];
+    const step = room.w / (wall.length + 1);
+    wall.forEach((prop, i) => {
+      drawSprite(ctx, prop, room.x + step * (i + 1), room.y + 54);
+    });
+    // ...and a little furniture stands out on the floor.
+    (room.floorProps || []).forEach(([prop, fx, fy]) => {
+      drawSprite(ctx, prop, room.x + room.w * fx, room.y + room.h * fy);
     });
     ctx.globalAlpha = 1;
   }
 
-  // Painter's algorithm: lower on screen draws later, so nearer people overlap.
+  // Painter's algorithm: people lower on screen draw last.
   agents.slice().sort((a, b) => pos[a.name].y - pos[b.name].y).forEach(a => {
     const p = pos[a.name];
-    drawSprite(ctx, spriteFor(a), p.x, p.y + TILE);
+    drawSprite(ctx, spriteFor(a), p.x, p.y);
   });
 }
+
+const CHAR_H = 34 * SCALE;
 
 function floorOverlay() {
   const f = state.floor;
   if (!f || !f.agents.length) return '';
   const pos = seat(f.agents);
-  const staffed = new Set(Object.values(pos).map(p => p.zone));
+  const staffed = new Set(Object.values(pos).map(p => p.room));
 
-  const labels = ZONES.map(z => `
-    <text class="zone-label" x="${z.x * TILE + 6}" y="${z.y * TILE + 13}"
-          opacity="${staffed.has(z.id) ? 0.95 : 0.5}">${esc(z.label)}</text>
-    ${staffed.has(z.id) ? '' : `<text class="zone-label" x="${(z.x + z.w) * TILE - 6}"
-      y="${z.y * TILE + 13}" text-anchor="end" opacity=".45">unstaffed</text>`}`).join('');
+  // Walled rooms label the wall itself; reception has no wall, so its label
+  // goes to the right where it cannot sit under the first agent's chip.
+  const labels = ROOMS.map(r => (r.tile
+    ? `<text class="room-label" x="${r.x + 8}" y="${r.y - WALL_H + 15}"
+             opacity="${staffed.has(r.id) ? 1 : 0.55}">${esc(r.label)}</text>`
+    : `<text class="room-label" x="${r.x + r.w - 8}" y="${r.y - 8}" text-anchor="end"
+             opacity=".7">${esc(r.label)}</text>`)).join('');
 
   const now = Date.now() / 1000;
   const wires = (f.traffic || []).filter(t => now - t.ts < 30 && pos[t.from] && pos[t.to])
     .slice(-6).map(t => {
       const a = pos[t.from], b = pos[t.to];
-      const ax = a.x, ay = a.y + TILE - 40, bx = b.x, by = b.y + TILE - 40;
-      const d = `M${ax},${ay} Q${(ax + bx) / 2},${Math.min(ay, by) - 40} ${bx},${by}`;
+      const ay = a.y - CHAR_H, by = b.y - CHAR_H;
+      const d = `M${a.x},${ay} Q${(a.x + b.x) / 2},${Math.min(ay, by) - 44} ${b.x},${by}`;
       return `<path class="wire" d="${d}"/>
         <circle r="3" fill="var(--accent)">
           <animateMotion dur="1.6s" repeatCount="indefinite" path="${d}"/>
         </circle>`;
     }).join('');
 
-  // The sprite's feet are at p.y + TILE and it is CHAR_H tall, so the chip
-  // hangs just above its head and the plate just below its feet.
-  const CHAR_H = 34;
+  // Labels are outlined text rather than boxes -- the old plates covered more
+  // of the art than they explained.
   const people = f.agents.map(a => {
     const p = pos[a.name], c = STATUS_COLOR[a.status] || 'var(--skip)';
     const on = state.agent === a.name;
-    const head = p.y + TILE - CHAR_H;
-    const feet = p.y + TILE;
+    const head = p.y - CHAR_H;
     return `<g class="station clickable" data-agent="${esc(a.name)}">
-      ${on ? `<rect x="${p.x - 20}" y="${head - 3}" width="40" height="${CHAR_H + 6}"
-               rx="5" fill="none" stroke="${c}" stroke-width="1.5" opacity=".9"/>` : ''}
-      <rect x="${p.x - 26}" y="${head - 16}" width="52" height="13" rx="3"
-            fill="var(--panel)" stroke="${c}" stroke-width="1" opacity=".95"/>
-      <text x="${p.x}" y="${head - 6}" text-anchor="middle" font-size="8"
-            font-family="var(--mono)" fill="${c}">${esc(a.status)}</text>
-      <rect x="${p.x - 30}" y="${feet + 1}" width="60" height="19" rx="3"
-            fill="var(--panel)" opacity=".85"/>
-      <text class="avatar-name" x="${p.x}" y="${feet + 9}" text-anchor="middle"
-            >${esc(a.name)}</text>
-      <text class="avatar-role" x="${p.x}" y="${feet + 17}" text-anchor="middle"
-            >${esc(a.role)}${a.inbox_pending ? ` · ${a.inbox_pending}` : ''}</text>
+      ${on ? `<rect x="${p.x - 22}" y="${head - 5}" width="44" height="${CHAR_H + 8}"
+               rx="5" fill="none" stroke="${c}" stroke-width="1.5" opacity=".95"/>` : ''}
+      <circle cx="${p.x - 20}" cy="${head - 7}" r="3.5" fill="${c}"/>
+      <text class="pix-status" x="${p.x - 13}" y="${head - 4}" fill="${c}"
+            >${esc(a.status)}</text>
+      <text class="pix-name" x="${p.x}" y="${p.y + 13}" text-anchor="middle"
+            >${esc(a.name)}${a.inbox_pending ? ` (${a.inbox_pending})` : ''}</text>
     </g>`;
   }).join('');
 
@@ -218,7 +283,8 @@ function renderFloor() {
   }
   return `<div class="floorstage">
     <canvas id="floorcanvas" width="${FW}" height="${FH}"></canvas>
-    <svg class="flooroverlay" viewBox="0 0 ${FW} ${FH}" preserveAspectRatio="none">${floorOverlay()}</svg>
+    <svg class="flooroverlay" viewBox="0 0 ${FW} ${FH}"
+         preserveAspectRatio="none">${floorOverlay()}</svg>
   </div>`;
 }
 

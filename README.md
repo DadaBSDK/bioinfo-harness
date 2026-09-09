@@ -84,10 +84,12 @@ office, curator in the sequencing bay, validator at the QC bench, analyst in the
 structure lab, scribe at the write-up desk — and rooms with nobody in them are
 dimmed and labelled `unstaffed`.
 
-Rooms are declared as tile-grid rectangles in `ZONES` (in `bioharness/ui/app.js`)
-with a floor tile and a prop list, so adding a room or moving a role is a data
-edit. Artwork lives in `bioharness/ui/assets/` — see the note there on
-regenerating it.
+The floor is one continuous building: a corridor surface underneath, rooms with
+tiled floors, and a wall band with a doorway above each. Rooms are declared as
+pixel rects in `ROOMS` (in `bioharness/ui/app.js`) with a floor tile, a list of
+equipment lining the back wall and a list of furniture standing on the floor —
+so adding a room or moving a role is a data edit, not a rendering change.
+Artwork lives in `bioharness/ui/assets/`; see the note there on regenerating it.
 
 Status is derived, never stored: an agent is `working` while it has acted in the
 last 25s, `awaiting` while it holds unread mail, `blocked` if its last event said
@@ -234,7 +236,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 78 passed
+pytest -q     # 79 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the
