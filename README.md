@@ -1,0 +1,197 @@
+# Bioinfo Harness
+
+A pluggable multi-agent harness for bioinformatics — inspired by
+[Munder Difflin](https://munderdiffl.in/), rebuilt around scientific pipelines
+instead of a code repository.
+
+Munder Difflin wraps agent CLIs as per-person "clone" nodes that share a memory
+palace, talk over file mailboxes, and run inside isolated git worktrees. The
+same shape works for a lab, with one substitution: **the substrate is not a repo,
+it is a capability registry**. Any tool becomes available to the agents by
+dropping a YAML manifest into `capabilities/` — an NGS aligner, an MD engine, a
+docking program, a Python function. The core knows about ports, types, runtimes,
+budgets and provenance. It never knows about a specific tool.
+
+```
+                    ┌──────────── hive ────────────┐
+  goal ──▶ PI ──▶ planner ──▶ curator ──▶ [orchestrator] ──▶ validator ──▶ analyst ──▶ scribe
+                    │  mailboxes · blackboard · memory palace · event log  │
+                    └──────────────────────────────┘
+                                     │
+                          capability registry (YAML)
+                    ┌────────────────┼────────────────┐
+                  NGS           structural          general
+            fastqc, fastp     pdb_fetch, gmx      multiqc, metrics
+            bwa, bcftools     vina, MDAnalysis
+```
+
+## Why this shape
+
+| Munder Difflin | Bioinfo Harness |
+|---|---|
+| Clone node wrapping an agent CLI | Role agent wrapping an agent CLI *or* a deterministic function |
+| Isolated git worktree | Isolated run workspace + hashed provenance ledger |
+| MemPalace shared memory | Markdown per-agent memory, mined into an FTS index |
+| Atomic-file mailboxes, single committer | Same — the orchestrator is the only executor |
+| Circuit breaker, token budgets | Budgets, breakers, and a steer → constrain → stop ladder |
+| Repo as substrate | **Capability registry as substrate** |
+
+## Install
+
+```bash
+pip install -e .            # core, needs only PyYAML
+pip install -e '.[md,dev]'  # + MDAnalysis, pytest
+```
+
+## Try it without installing a single bioinformatics tool
+
+```bash
+bioharness doctor                       # what is actually runnable here
+bioharness caps --domain structural     # browse the registry
+bioharness plan fastq vcf -d ngs        # route between two data types
+bioharness plan pdb trajectory -d structural
+```
+
+`plan` walks the type graph built from the installed manifests — `fastq → bam →
+vcf` for NGS, `pdb → topology/coordinates → trajectory` for MD — so routing is a
+property of what you have installed, not a hardcoded pipeline.
+
+Every workflow runs in `--dry-run` first. It resolves and prints the exact
+command for **every** step, chaining predicted outputs through the whole DAG,
+without executing anything:
+
+```bash
+bioharness run wgs-variants --dry-run \
+  --set reads=/data/sample_R1.fastq.gz \
+  --set reference=/refs/GRCh38.fa
+
+bioharness run md-stability --dry-run --set pdb_id=1AKI
+```
+
+## Run the agents
+
+```bash
+bioharness mission "call variants in this WGS sample" \
+  --roles pi planner curator --from-type fastq --to-type vcf -d ngs
+```
+
+With no `--provider`, the roster still works: the planner routes through the
+type graph, the curator validates paths and file types, the validator applies QC
+gates — all deterministic, all at zero token cost. Add `--provider claude`
+(or `codex`, `gemini`, …) and the same agents gain an LLM for the judgement
+calls, charged to a per-run budget and recorded in the cost ledger.
+
+## Adding a tool
+
+This is the whole integration story. Drop a manifest into `capabilities/`:
+
+```yaml
+capabilities:
+  - id: samtools_flagstat
+    domain: ngs
+    version: "1.19"
+    summary: Alignment summary metrics from a BAM
+    runtime: {kind: docker, image: "quay.io/biocontainers/samtools:1.19--h50ea8bc_0", binary: samtools}
+    command: "sh -c \"samtools flagstat {{ inputs.bam }} > {{ outdir }}/flagstat.txt\""
+    inputs:  [{name: bam, type: bam}]
+    outputs: [{name: metrics, type: table, glob: "flagstat.txt"}]
+    resources: {cpu: 2, mem_gb: 4}
+    citation: "Danecek P, et al. GigaScience. 2021."
+```
+
+The tool is now searchable, routable by the planner, executable by the
+orchestrator, and citable by the scribe. No code changes.
+
+**Runtimes:** `binary` · `conda` · `docker` · `apptainer` (HPC) · `python`
+(in-process function) · `agent` (delegate to an LLM CLI). Declare `requires:`
+for Python capabilities whose heavy dependency is imported lazily, so `doctor`
+reports availability honestly instead of failing mid-run.
+
+## Workflows
+
+```yaml
+name: wgs-variants
+params: {reads: null, reference: null, threads: 8}
+steps:
+  - id: align
+    capability: bwa_mem
+    with:  {reads: "{{ params.reads }}", reference: "{{ params.reference }}"}
+    params: {threads: "{{ params.threads }}"}
+    retries: 1
+  - id: call
+    capability: bcftools_call
+    with: {bam: "{{ steps.align.outputs.bam }}", reference: "{{ params.reference }}"}
+    needs: [align]
+```
+
+- `needs:` — DAG edges, topologically sorted, cycles rejected up front
+- `scatter:` — fan one step out per item (see `workflows/dock-screen.yaml`)
+- `when:` — guard a step on a parameter, compared as data, never `eval`'d
+- `retries:` — bounded, and still subject to the circuit breaker
+
+## Guardrails
+
+Bioinformatics fails expensively — a mis-specified MD run burns GPU-days, a
+looping agent burns tokens. Every execution path checks guardrails first.
+
+- **Budget** — steps, wallclock, tokens, USD, CPU-hours, GPU-hours
+- **Circuit breaker** — a capability that fails repeatedly stops being retried
+- **Intervention ladder** — a misbehaving agent is *steered*, then *constrained*
+  (autonomy dropped to propose-only), and only then *stopped*; each rung is logged
+- **Autonomy levels** — `read_only` · `suggest` · `bounded` · `full`
+
+## Provenance
+
+Every run writes an auditable tree:
+
+```
+runs/<run_id>/
+  run.json        workflow, params, host, platform, python version
+  ledger.jsonl    append-only: every task, every artifact, SHA-256 hashed
+  summary.json    status, timings, resolved commands, guardrail state
+  steps/<id>/     the step's cwd, stdout.log, stderr.log, outputs
+  results/        promoted final outputs
+```
+
+The scribe writes the Methods section from that ledger — tool versions and the
+parameters actually used — so the write-up cannot drift from the run.
+
+## The hive
+
+```
+.bioharness/hive/
+  agents/<name>/identity.json  memory.md  inbox/  outbox/  archive/
+  blackboard/<key>.json        shared facts
+  events.jsonl                 append-only event log
+  palace/index.sqlite          FTS index over all agent memory
+```
+
+Everything is a plain file you can `cat` — which matters when a run is
+half-finished on a cluster node at 3am, and lets the harness work over NFS/Lustre
+where a socket would not. Messages are written tmpfile-then-`os.replace`, so a
+reader never sees a partial message. Only the router moves mail between agents,
+and only the orchestrator executes tools — the single-committer rule that keeps
+parallel agents from colliding.
+
+```bash
+bioharness status                 # roster, pending mail, cost ledger
+bioharness recall "coverage gate" # search the memory palace
+```
+
+## Tests
+
+```bash
+pytest -q     # 47 passed
+```
+
+The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the
+harness mechanics — binding, DAG ordering, scatter, retries, provenance hashing,
+budgets, breakers, mailbox routing — on any machine, with no bioinformatics tool
+installed.
+
+## Status
+
+Working core. Not yet built: HPC submission (Slurm/SGE executor backends),
+encrypted cross-machine transport for the mailbox layer, and a UI.
+
+MIT.

@@ -1,0 +1,55 @@
+name: wgs-variants
+description: Short-read WGS from raw reads to annotated variants, with QC gating.
+
+params:
+  reads: null            # set with: --set reads=/data/sample_R1.fastq.gz
+  reference: null        # set with: --set reference=/refs/GRCh38.fa
+  genome_build: GRCh38.99
+  threads: 8
+
+steps:
+  - id: raw_qc
+    capability: fastqc
+    with: {reads: "{{ params.reads }}"}
+    params: {threads: "{{ params.threads }}"}
+    description: Baseline read quality before any processing.
+
+  - id: trim
+    capability: fastp
+    with: {reads: "{{ params.reads }}"}
+    params: {min_qual: 20, min_len: 36, threads: "{{ params.threads }}"}
+    needs: [raw_qc]
+
+  - id: align
+    capability: bwa_mem
+    with:
+      reads: "{{ steps.trim.outputs.trimmed }}"
+      reference: "{{ params.reference }}"
+    params: {threads: "{{ params.threads }}"}
+    needs: [trim]
+    retries: 1
+
+  - id: align_qc
+    capability: samtools_flagstat
+    with: {bam: "{{ steps.align.outputs.bam }}"}
+    needs: [align]
+
+  - id: gate
+    capability: metrics_extract
+    with:
+      source: ["{{ steps.trim.outputs.metrics }}", "{{ steps.align_qc.outputs.metrics }}"]
+    needs: [align_qc]
+    description: Flatten tool metrics so the validator agent can gate the run.
+
+  - id: call
+    capability: bcftools_call
+    with:
+      bam: "{{ steps.align.outputs.bam }}"
+      reference: "{{ params.reference }}"
+    needs: [gate]
+
+  - id: annotate
+    capability: snpeff
+    with: {vcf: "{{ steps.call.outputs.vcf }}"}
+    params: {genome: "{{ params.genome_build }}"}
+    needs: [call]

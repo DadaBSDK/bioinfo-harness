@@ -1,0 +1,115 @@
+# Structural bioinformatics: MD and docking. Same manifest schema, same core --
+# only the data types differ (pdb / topology / trajectory instead of fastq / bam).
+capabilities:
+  - id: pdb_fetch
+    domain: structural
+    version: "1.0"
+    summary: Download a structure from the RCSB PDB by accession
+    runtime: {kind: binary, binary: curl}
+    command: >-
+      curl -fsSL -o {{ outdir }}/{{ params.pdb_id }}.pdb
+      https://files.rcsb.org/download/{{ params.pdb_id }}.pdb
+    inputs: []
+    outputs:
+      - {name: structure, type: pdb, glob: "*.pdb"}
+    params: {pdb_id: "1AKI"}
+    resources: {cpu: 1, mem_gb: 1, walltime_min: 10}
+    tags: [fetch, structure, rcsb]
+
+  - id: pdbfixer
+    domain: structural
+    version: "1.9"
+    summary: Repair missing atoms/residues and protonate a structure
+    runtime: {kind: conda, conda_env: bioharness-md, binary: pdbfixer}
+    command: >-
+      pdbfixer {{ inputs.structure }} --output={{ outdir }}/fixed.pdb
+      --add-atoms=all --add-residues --ph={{ params.ph }}
+    inputs:
+      - {name: structure, type: pdb}
+    outputs:
+      - {name: fixed, type: pdb, glob: "fixed.pdb"}
+    params: {ph: 7.4}
+    resources: {cpu: 1, mem_gb: 4}
+    tags: [prep, protonation]
+    citation: "Eastman P, et al. OpenMM 7. PLoS Comput Biol. 2017."
+
+  - id: gmx_prepare
+    domain: structural
+    version: "2024.1"
+    summary: Build topology, solvate and ionise a system for MD
+    runtime: {kind: docker, image: "gromacs/gromacs:2024.1", binary: gmx}
+    command: >-
+      sh -c "gmx pdb2gmx -f {{ inputs.structure }} -o {{ outdir }}/processed.gro
+      -p {{ outdir }}/topol.top -ff {{ params.forcefield }} -water {{ params.water }} &&
+      gmx editconf -f {{ outdir }}/processed.gro -o {{ outdir }}/boxed.gro
+      -c -d {{ params.box_nm }} -bt cubic &&
+      gmx solvate -cp {{ outdir }}/boxed.gro -o {{ outdir }}/solvated.gro -p {{ outdir }}/topol.top"
+    inputs:
+      - {name: structure, type: pdb}
+    outputs:
+      - {name: topology, type: topology, glob: "topol.top"}
+      - {name: coordinates, type: coordinates, glob: "solvated.gro"}
+    params: {forcefield: amber99sb-ildn, water: tip3p, box_nm: 1.0}
+    resources: {cpu: 4, mem_gb: 8, walltime_min: 120}
+    tags: [md, topology, solvation]
+    citation: "Abraham MJ, et al. GROMACS: High performance molecular simulation. SoftwareX. 2015."
+
+  - id: gmx_mdrun
+    domain: structural
+    version: "2024.1"
+    summary: Run a GPU-accelerated molecular dynamics production simulation
+    runtime: {kind: docker, image: "gromacs/gromacs:2024.1", binary: gmx}
+    command: >-
+      sh -c "gmx grompp -f {{ params.mdp }} -c {{ inputs.coordinates }}
+      -p {{ inputs.topology }} -o {{ outdir }}/md.tpr -maxwarn 2 &&
+      gmx mdrun -deffnm {{ outdir }}/md -nt {{ threads }} -nsteps {{ params.nsteps }}"
+    inputs:
+      - {name: coordinates, type: coordinates}
+      - {name: topology, type: topology}
+    outputs:
+      - {name: trajectory, type: trajectory, glob: "md.xtc"}
+      - {name: energy, type: energy, glob: "md.edr", optional: true}
+      - {name: log, type: table, glob: "md.log", optional: true}
+    params: {mdp: md.mdp, nsteps: 500000, threads: 8}
+    resources: {cpu: 8, mem_gb: 16, gpu: 1, walltime_min: 1440}
+    tags: [md, simulation, production]
+    citation: "Abraham MJ, et al. GROMACS: High performance molecular simulation. SoftwareX. 2015."
+
+  - id: mdanalysis_rmsd
+    domain: structural
+    version: "2.7"
+    summary: Compute backbone RMSD and radius of gyration over a trajectory
+    runtime: {kind: python, entrypoint: "bioharness.tools.md_analysis:rmsd"}
+    requires: [MDAnalysis]
+    command: ""
+    inputs:
+      - {name: trajectory, type: trajectory}
+      - {name: topology, type: topology, optional: true}
+    outputs:
+      - {name: metrics, type: table, glob: "rmsd.csv"}
+    params: {selection: "backbone", stride: 1}
+    resources: {cpu: 2, mem_gb: 8}
+    tags: [analysis, md, rmsd]
+    citation: "Michaud-Agrawal N, et al. MDAnalysis. J Comput Chem. 2011."
+
+  - id: vina_dock
+    domain: structural
+    version: "1.2.5"
+    summary: Dock a ligand into a receptor binding site
+    runtime: {kind: docker, image: "quay.io/biocontainers/autodock-vina:1.2.5--h4ac6f70_0", binary: vina}
+    command: >-
+      vina --receptor {{ inputs.receptor }} --ligand {{ inputs.ligand }}
+      --center_x {{ params.center_x }} --center_y {{ params.center_y }}
+      --center_z {{ params.center_z }} --size_x {{ params.size }}
+      --size_y {{ params.size }} --size_z {{ params.size }}
+      --exhaustiveness {{ params.exhaustiveness }}
+      --out {{ outdir }}/docked.pdbqt --cpu {{ threads }}
+    inputs:
+      - {name: receptor, type: pdb}
+      - {name: ligand, type: pdb}
+    outputs:
+      - {name: poses, type: pose, glob: "docked.pdbqt"}
+    params: {center_x: 0, center_y: 0, center_z: 0, size: 20, exhaustiveness: 8, threads: 4}
+    resources: {cpu: 4, mem_gb: 4, walltime_min: 180}
+    tags: [docking, ligand, screening]
+    citation: "Eberhardt J, et al. AutoDock Vina 1.2.0. J Chem Inf Model. 2021."

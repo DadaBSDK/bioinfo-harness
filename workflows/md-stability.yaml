@@ -1,0 +1,42 @@
+name: md-stability
+description: Fetch a structure, prepare a solvated system, run MD, measure stability.
+
+params:
+  pdb_id: "1AKI"
+  forcefield: amber99sb-ildn
+  nsteps: 500000        # 1 ns at 2 fs
+  threads: 8
+
+steps:
+  - id: fetch
+    capability: pdb_fetch
+    params: {pdb_id: "{{ params.pdb_id }}"}
+
+  - id: repair
+    capability: pdbfixer
+    with: {structure: "{{ steps.fetch.outputs.structure }}"}
+    params: {ph: 7.4}
+    needs: [fetch]
+
+  - id: prepare
+    capability: gmx_prepare
+    with: {structure: "{{ steps.repair.outputs.fixed }}"}
+    params: {forcefield: "{{ params.forcefield }}", water: tip3p, box_nm: 1.0}
+    needs: [repair]
+
+  - id: simulate
+    capability: gmx_mdrun
+    with:
+      coordinates: "{{ steps.prepare.outputs.coordinates }}"
+      topology: "{{ steps.prepare.outputs.topology }}"
+    params: {nsteps: "{{ params.nsteps }}", threads: "{{ params.threads }}"}
+    needs: [prepare]
+    retries: 1
+
+  - id: stability
+    capability: mdanalysis_rmsd
+    with:
+      trajectory: "{{ steps.simulate.outputs.trajectory }}"
+      topology: "{{ steps.prepare.outputs.topology }}"
+    params: {selection: backbone, stride: 10}
+    needs: [simulate]

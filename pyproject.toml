@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bioharness"
+version = "0.1.0"
+description = "A pluggable multi-agent harness for bioinformatics"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+dependencies = ["pyyaml>=6.0"]
+
+[project.optional-dependencies]
+md = ["MDAnalysis>=2.7"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+bioharness = "bioharness.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["bioharness*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

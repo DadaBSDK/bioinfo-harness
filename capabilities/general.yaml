@@ -1,0 +1,28 @@
+# Domain-agnostic utilities available to every pipeline.
+capabilities:
+  - id: multiqc
+    domain: general
+    version: "1.21"
+    summary: Aggregate QC reports from many tools into one HTML summary
+    runtime: {kind: docker, image: "quay.io/biocontainers/multiqc:1.21--pyhdfd78af_0", binary: multiqc}
+    command: "multiqc {{ inputs.reports }} --outdir {{ outdir }} --force"
+    inputs:
+      - {name: reports, type: dir, multiple: true}
+    outputs:
+      - {name: summary, type: html, glob: "multiqc_report.html"}
+    resources: {cpu: 2, mem_gb: 4}
+    tags: [qc, report, aggregate]
+    citation: "Ewels P, et al. MultiQC. Bioinformatics. 2016."
+
+  - id: metrics_extract
+    domain: general
+    version: "0.1"
+    summary: Parse tool metric files into a flat metric table for QC gating
+    runtime: {kind: python, entrypoint: "bioharness.tools.metrics:extract"}
+    command: ""
+    inputs:
+      - {name: source, type: table, multiple: true}
+    outputs:
+      - {name: metrics, type: metrics, glob: "metrics.json"}
+    resources: {cpu: 1, mem_gb: 1, walltime_min: 10}
+    tags: [qc, parse, gating]

@@ -1,0 +1,102 @@
+# Short-read NGS. Nothing here is special-cased in the harness core -- these are
+# ordinary manifests, and deleting this file removes NGS support cleanly.
+capabilities:
+  - id: fastqc
+    domain: ngs
+    version: "0.12.1"
+    summary: Quality control report for raw sequencing reads
+    runtime: {kind: docker, image: "quay.io/biocontainers/fastqc:0.12.1--hdfd78af_0", binary: fastqc}
+    command: "fastqc {{ inputs.reads }} --outdir {{ outdir }} --threads {{ threads }}"
+    inputs:
+      - {name: reads, type: fastq, multiple: true, description: Raw or trimmed reads}
+    outputs:
+      - {name: report, type: html, glob: "*_fastqc.html", multiple: true}
+      - {name: zip, type: archive, glob: "*_fastqc.zip", multiple: true, optional: true}
+    params: {threads: 4}
+    resources: {cpu: 4, mem_gb: 4, walltime_min: 60}
+    tags: [qc, reads, illumina]
+    citation: "Andrews S. FastQC: a quality control tool for high throughput sequence data. 2010."
+
+  - id: fastp
+    domain: ngs
+    version: "0.23.4"
+    summary: Adapter trimming and quality filtering of reads
+    runtime: {kind: docker, image: "quay.io/biocontainers/fastp:0.23.4--h5f740d0_0", binary: fastp}
+    command: >-
+      fastp -i {{ inputs.reads }} -o {{ outdir }}/trimmed.fastq.gz
+      -j {{ outdir }}/fastp.json -h {{ outdir }}/fastp.html
+      -q {{ params.min_qual }} -l {{ params.min_len }} -w {{ threads }}
+    inputs:
+      - {name: reads, type: fastq}
+    outputs:
+      - {name: trimmed, type: fastq, glob: "trimmed.fastq.gz"}
+      - {name: metrics, type: table, glob: "fastp.json"}
+    params: {min_qual: 20, min_len: 36, threads: 4}
+    resources: {cpu: 4, mem_gb: 4}
+    tags: [trim, qc]
+    citation: "Chen S, et al. fastp: an ultra-fast all-in-one FASTQ preprocessor. Bioinformatics. 2018."
+
+  - id: bwa_mem
+    domain: ngs
+    version: "0.7.17"
+    summary: Align short reads to a reference genome
+    runtime: {kind: docker, image: "quay.io/biocontainers/bwa:0.7.17--he4a0461_11", binary: bwa}
+    command: >-
+      sh -c "bwa mem -t {{ threads }} {{ inputs.reference }} {{ inputs.reads }}
+      | samtools sort -@ {{ threads }} -o {{ outdir }}/aligned.bam - && samtools index {{ outdir }}/aligned.bam"
+    inputs:
+      - {name: reads, type: fastq, multiple: true}
+      - {name: reference, type: fasta, description: BWA-indexed reference}
+    outputs:
+      - {name: bam, type: bam, glob: "aligned.bam"}
+      - {name: index, type: bai, glob: "aligned.bam.bai", optional: true}
+    params: {threads: 8}
+    resources: {cpu: 8, mem_gb: 16, walltime_min: 480}
+    tags: [align, dna]
+    citation: "Li H. Aligning sequence reads with BWA-MEM. arXiv:1303.3997. 2013."
+
+  - id: samtools_flagstat
+    domain: ngs
+    version: "1.19"
+    summary: Alignment summary metrics from a BAM
+    runtime: {kind: docker, image: "quay.io/biocontainers/samtools:1.19--h50ea8bc_0", binary: samtools}
+    command: "sh -c \"samtools flagstat {{ inputs.bam }} > {{ outdir }}/flagstat.txt\""
+    inputs:
+      - {name: bam, type: bam}
+    outputs:
+      - {name: metrics, type: table, glob: "flagstat.txt"}
+    resources: {cpu: 2, mem_gb: 4}
+    tags: [qc, align]
+    citation: "Danecek P, et al. Twelve years of SAMtools and BCFtools. GigaScience. 2021."
+
+  - id: bcftools_call
+    domain: ngs
+    version: "1.19"
+    summary: Call small variants from an alignment
+    runtime: {kind: docker, image: "quay.io/biocontainers/bcftools:1.19--h8b25389_0", binary: bcftools}
+    command: >-
+      sh -c "bcftools mpileup -f {{ inputs.reference }} {{ inputs.bam }}
+      | bcftools call -mv -Oz -o {{ outdir }}/variants.vcf.gz"
+    inputs:
+      - {name: bam, type: bam}
+      - {name: reference, type: fasta}
+    outputs:
+      - {name: vcf, type: vcf, glob: "variants.vcf.gz"}
+    resources: {cpu: 4, mem_gb: 8, walltime_min: 240}
+    tags: [variants, snv]
+    citation: "Danecek P, et al. Twelve years of SAMtools and BCFtools. GigaScience. 2021."
+
+  - id: snpeff
+    domain: ngs
+    version: "5.2"
+    summary: Functional annotation of called variants
+    runtime: {kind: docker, image: "quay.io/biocontainers/snpeff:5.2--hdfd78af_0", binary: snpEff}
+    command: "sh -c \"snpEff -v {{ params.genome }} {{ inputs.vcf }} > {{ outdir }}/annotated.vcf\""
+    inputs:
+      - {name: vcf, type: vcf}
+    outputs:
+      - {name: annotated, type: annotation, glob: "annotated.vcf"}
+    params: {genome: GRCh38.99}
+    resources: {cpu: 2, mem_gb: 8}
+    tags: [annotation, variants]
+    citation: "Cingolani P, et al. A program for annotating and predicting the effects of SNPs. Fly. 2012."
