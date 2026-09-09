@@ -2,12 +2,15 @@
 
 const $ = (s, r = document) => r.querySelector(s);
 const TABS = ['floor', 'runs', 'hive', 'caps', 'cost'];
-const CC_TABS = ['activity', 'workers', 'memory', 'tasks', 'graph'];
+const CC_TABS = ['activity', 'workers', 'staff', 'memory', 'tasks', 'graph'];
 
 const state = {
   tab: 'floor', cc: 'activity', runId: null, agent: null,
   runs: [], detail: null, hive: null, caps: null, overview: null, floor: null,
   log: null, logTab: 'stderr', sent: '', sending: false,
+  staffOptions: null, hireMsg: '', hiring: false,
+  // Kept in state so a repaint never discards a half-filled form.
+  hireForm: { name: '', role: '', provider: 'builtin', model: '', autonomy: 'bounded' },
 };
 
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c =>
@@ -616,6 +619,56 @@ function ccWorkers() {
     </div></div>`).join('');
 }
 
+function ccStaff() {
+  const opt = state.staffOptions;
+  if (!opt) return '<div class="empty">loading…</div>';
+  const agents = state.floor?.agents || [];
+
+  const roster = agents.map(a => `<tr>
+      <td class="mono">${esc(a.name)}</td>
+      <td class="mono" style="color:var(--muted)">${esc(a.role)}</td>
+      <td class="mono">${esc(a.provider)}${a.model ? `<br><span
+        style="color:var(--muted)">${esc(a.model)}</span>` : ''}</td>
+      <td><button class="mini" data-fire="${esc(a.name)}">dismiss</button></td>
+    </tr>`).join('');
+
+  const f = state.hireForm;
+  const sel = (v, cur) => (v === cur ? 'selected' : '');
+  const provOpts = opt.providers.map(p =>
+    `<option value="${esc(p.id)}" ${p.available ? '' : 'disabled'} ${sel(p.id, f.provider)}
+      >${esc(p.label)}${p.available ? '' : ' — ' + esc(p.reason)}</option>`).join('');
+  const api = opt.providers.find(p => p.id === 'claude-api');
+
+  return `<div class="card"><h3>Roster</h3>
+      ${roster ? `<table><tbody>${roster}</tbody></table>`
+               : '<div class="empty">nobody hired yet</div>'}</div>
+
+    <div class="card"><h3>Hire an agent</h3><div class="card-body">
+      <div class="field"><label for="hname">name</label>
+        <input class="search" id="hname" placeholder="e.g. ada" autocomplete="off"
+               value="${esc(f.name)}"></div>
+      <div class="field"><label for="hrole">role</label>
+        <select class="pick wide" id="hrole">${
+          opt.roles.map(r => `<option ${sel(r, f.role)}>${esc(r)}</option>`).join('')
+          }</select></div>
+      <div class="field"><label for="hprov">provider</label>
+        <select class="pick wide" id="hprov">${provOpts}</select></div>
+      <div class="field"><label for="hmodel">model</label>
+        <select class="pick wide" id="hmodel">${
+          (api?.models || []).map(m => `<option ${sel(m, f.model)}>${esc(m)}</option>`).join('')
+          || '<option value="">n/a</option>'}</select></div>
+      <div class="field"><label for="hauto">autonomy</label>
+        <select class="pick wide" id="hauto">${
+          opt.autonomy.map(a => `<option ${sel(a, f.autonomy)}>${esc(a)}</option>`
+            ).join('')}</select></div>
+      <button class="send" id="hire" ${state.hiring ? 'disabled' : ''}
+        style="margin-top:8px">hire</button>
+      ${state.hireMsg ? `<div class="sent">${esc(state.hireMsg)}</div>` : ''}
+      ${api && !api.available ? `<div class="sent" style="color:var(--run)">
+        Claude API: ${esc(api.reason)}</div>` : ''}
+    </div></div>`;
+}
+
 function ccMemory() {
   return `<input class="search" id="recall" placeholder="Search agent memory…">
           <div id="recall-out"></div>`;
@@ -645,8 +698,8 @@ function ccHeader() {
 }
 
 function ccBody() {
-  return { activity: ccActivity, workers: ccWorkers, memory: ccMemory,
-           tasks: ccTasks, graph: ccGraph }[state.cc]();
+  return { activity: ccActivity, workers: ccWorkers, staff: ccStaff,
+           memory: ccMemory, tasks: ccTasks, graph: ccGraph }[state.cc]();
 }
 
 const TOPICS = ['goal', 'plan.request', 'data.validate', 'qc.check', 'analyze', 'report'];
@@ -966,6 +1019,12 @@ async function refresh(full = false) {
     if (state.runId) state.detail = await api(`/api/runs/${state.runId}`).catch(() => null);
     if (state.tab === 'hive' || full || !state.hive) state.hive = await api('/api/hive');
     if ((state.tab === 'caps' && !state.caps) || full) state.caps = await api('/api/caps');
+    if (!state.staffOptions) {
+      state.staffOptions = await api('/api/staff/options');
+      state.hireForm.role ||= state.staffOptions.roles[0];
+      state.hireForm.model ||= (state.staffOptions.providers
+        .find(p => p.id === 'claude-api')?.models || [])[0] || '';
+    }
     $('#pulse').className = 'dot';
     $('#tick').textContent = new Date().toLocaleTimeString();
   } catch {
@@ -982,6 +1041,46 @@ async function loadLog(step) {
     encodeURIComponent(step)}&stream=${state.logTab}`);
   state.log = { step, text: r.exists ? r.text : `(no ${state.logTab}.log for ${step})` };
   render();
+}
+
+/** Copy whatever is currently in the hire fields into state. */
+function syncHireForm() {
+  const f = state.hireForm;
+  const get = id => $(`#${id}`)?.value;
+  f.name = get('hname') ?? f.name;
+  f.role = get('hrole') ?? f.role;
+  f.provider = get('hprov') ?? f.provider;
+  f.model = get('hmodel') ?? f.model;
+  f.autonomy = get('hauto') ?? f.autonomy;
+}
+
+async function hireAgent() {
+  syncHireForm();
+  const body = { ...state.hireForm, name: state.hireForm.name.trim() };
+  if (!body.name) { state.hireMsg = 'give them a name first'; return render(); }
+  state.hiring = true; render();
+  const r = await api('/api/staff/hire', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  state.hiring = false;
+  state.hireMsg = r.ok ? `hired ${r.agent.name} as ${r.agent.role}` : `refused: ${r.error}`;
+  if (r.ok) state.hireForm.name = '';
+  await refresh();
+  // The roster changed, so the cc body is stale even though it holds focus.
+  const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
+}
+
+async function fireAgent(name) {
+  const r = await api('/api/staff/fire', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  state.hireMsg = r.ok ? `dismissed ${name}` : `refused: ${r.error}`;
+  if (state.agent === name) state.agent = null;
+  delete WORLD.actors[name];
+  await refresh();
+  const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
 }
 
 async function sendMessage() {
@@ -1033,9 +1132,18 @@ document.addEventListener('click', e => {
   const lt = e.target.closest('[data-logtab]');
   if (lt && state.log) { state.logTab = lt.dataset.logtab; return loadLog(state.log.step); }
   if (e.target.id === 'qsend') return sendMessage();
+  if (e.target.id === 'hire') return hireAgent();
+  const fire = e.target.closest('[data-fire]');
+  if (fire) return fireAgent(fire.dataset.fire);
+});
+
+document.addEventListener('change', e => {
+  if (e.target.closest?.('.cc-foot')) return;
+  if (['hname', 'hrole', 'hprov', 'hmodel', 'hauto'].includes(e.target.id)) syncHireForm();
 });
 
 document.addEventListener('input', async e => {
+  if (['hname'].includes(e.target.id)) syncHireForm();
   if (e.target.id !== 'recall') return;
   const q = e.target.value.trim();
   const out = $('#recall-out');

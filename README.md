@@ -130,6 +130,12 @@ the bottom queues a message straight into an agent's mailbox.
   unavailable tool is unavailable.
 - **cost** — token accounting per agent, plus the run's budget and breaker state.
 
+The command center's **staff** tab hires and dismisses agents from the browser:
+pick a name, role, provider, model and autonomy level, and the new agent walks
+onto the floor. Providers that cannot run here are shown disabled with the
+reason. Dismissing archives the agent's memory and mail under `former/` rather
+than deleting it.
+
 ### What the dashboard may do
 
 It is loopback-bound and reads files for everything. There is exactly **one**
@@ -145,15 +151,38 @@ Point it at a cluster run over `ssh -L 8765:127.0.0.1:8765`. Stdlib
 ## Run the agents
 
 ```bash
-bioharness mission "call variants in this WGS sample" \
-  --roles pi planner curator --from-type fastq --to-type vcf -d ngs
+bioharness staff hire ada --role analyst --provider claude-api --model claude-opus-5
+bioharness staff hire quill --role scribe            # deterministic, free
+bioharness staff list
+bioharness mission "call variants in this WGS sample" --from-type fastq --to-type vcf -d ngs
 ```
 
-With no `--provider`, the roster still works: the planner routes through the
-type graph, the curator validates paths and file types, the validator applies QC
-gates — all deterministic, all at zero token cost. Add `--provider claude`
-(or `codex`, `gemini`, …) and the same agents gain an LLM for the judgement
-calls, charged to a per-run budget and recorded in the cost ledger.
+With no `--roles`, a mission staffs itself from whoever is hired, and each agent
+uses **its own** provider — so an API-backed analyst and a deterministic curator
+work the same mission. `--roles` overrides the roster for one run.
+
+### Providers
+
+| Provider | What it is | Cost |
+|---|---|---|
+| `builtin` | Deterministic logic — type-graph planning, path/type curation, QC gates | free |
+| `claude-api` | The Anthropic Messages API via the official SDK | metered, real usage |
+| `claude`, `codex`, `gemini`, `qwen`, … | An agent CLI you already have logged in | your subscription |
+
+The Claude API provider defaults to **`claude-opus-5`** with adaptive thinking,
+and sets `effort` per role (planner and analyst reason harder than the curator).
+It reads real `usage` off each response, so the cost ledger is measured rather
+than estimated — cache reads at 0.1x input, cache writes at 1.25x.
+
+Credentials resolve the way the SDK resolves them: `ANTHROPIC_API_KEY`, then
+`ANTHROPIC_AUTH_TOKEN`, then a stored `ant auth login` profile. An unset API key
+does not mean there are no credentials, and `bioharness doctor` reports which
+source is in play. **If a provider is unavailable the agent still runs** — it
+falls back to its deterministic behaviour and says so, rather than failing the
+mission.
+
+Every role can be staffed more than once: hire two curators and they take
+neighbouring desks in the sequencing bay.
 
 ## Adding a tool
 
@@ -255,7 +284,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 82 passed
+pytest -q     # 110 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

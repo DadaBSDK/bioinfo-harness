@@ -290,6 +290,40 @@ class Hive:
         self.event("agent.enrolled", identity)
         return identity
 
+    def attach(self, name: str, role: str, **defaults: Any) -> dict[str, Any]:
+        """Register an agent for this session without rewriting how it was hired.
+
+        `enroll` is the hiring path and overwrites the record. Instantiating an
+        Agent must not: a mission that falls back to a deterministic provider
+        would otherwise permanently downgrade an agent hired against the API.
+        """
+        box = self.mailbox(name)
+        existing = box.dir / "identity.json"
+        if existing.is_file():
+            try:
+                identity = json.loads(existing.read_text())
+            except (json.JSONDecodeError, OSError):
+                identity = {}
+            if identity.get("name") and identity.get("role"):
+                identity["last_seen"] = time.time()
+                atomic_write(existing, json.dumps(identity, indent=2, default=str))
+                return identity
+        return self.enroll(name, role, **defaults)
+
+    def dismiss(self, name: str) -> bool:
+        """Retire an agent. The directory is moved aside rather than deleted so
+        its memory and message archive remain auditable."""
+        src = self.root / "agents" / name
+        if not src.is_dir():
+            return False
+        former = self.root / "former"
+        former.mkdir(parents=True, exist_ok=True)
+        dest = former / f"{name}-{int(time.time())}"
+        src.replace(dest)
+        self._boxes.pop(name, None)
+        self.event("agent.dismissed", {"name": name, "archived_to": str(dest)})
+        return True
+
     def roster(self) -> list[dict[str, Any]]:
         out = []
         base = self.root / "agents"

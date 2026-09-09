@@ -238,3 +238,16 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding
 .station .hit { fill: transparent; }
 .station .sel { fill: none; stroke: transparent; stroke-width: 1.5; }
 .station.on .pix-name { fill: var(--accent); }
+
+/* hire form */
+.field { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.field label {
+  width: 66px; flex: none; font: 11px var(--mono); color: var(--muted);
+  text-transform: uppercase; letter-spacing: .06em;
+}
+.pick.wide { flex: 1; min-width: 0; }
+button.mini {
+  border: 1px solid var(--line); border-radius: 6px; background: var(--bg);
+  color: var(--muted); font: 11px var(--mono); padding: 3px 8px; cursor: pointer;
+}
+button.mini:hover { border-color: var(--fail); color: var(--fail); }

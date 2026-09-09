@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .agents.api_provider import APIProvider, MODELS, make_provider
 from .agents.base import AgentContext, CLIProvider
 from .agents.roles import ROLES, plan_by_types
 from .core.guardrails import Budget, Guardrails
@@ -160,16 +161,35 @@ def cmd_mission(args: argparse.Namespace) -> int:
     rails = Guardrails(budget=Budget(max_usd=args.max_usd), dry_run=args.dry_run)
     ctx = AgentContext(hive=hive, registry=reg, guardrails=rails,
                        workdir=Path(args.hive).parent / "agents")
-    provider = CLIProvider(args.provider, args.model) if args.provider else None
+    provider = make_provider(args.provider, args.model) if args.provider else None
     if provider and not provider.available():
-        print(color(f"provider {args.provider!r} not on PATH; "
+        why = (provider.unavailable_reason() if hasattr(provider, "unavailable_reason")
+               else "not on PATH")
+        print(color(f"provider {args.provider!r} unavailable ({why}); "
                     f"agents will use deterministic fallbacks", "yellow"))
         provider = None
 
-    agents = [ROLES[name](name, ctx, provider=provider) for name in args.roles]
+    # Without --roles, staff the mission from whoever is already hired, using
+    # each agent's own provider rather than one provider for everybody.
+    if args.roles:
+        agents = [ROLES[name](name, ctx, provider=provider) for name in args.roles]
+        names = list(args.roles)
+    else:
+        roster = [a for a in hive.roster() if a.get("role") in ROLES]
+        if not roster:
+            print(color("nobody hired. Use --roles, or: "
+                        "bioharness staff hire ada --role planner", "red"))
+            return 1
+        agents, names = [], []
+        for ident in roster:
+            own = provider or provider_for(ident)
+            agents.append(ROLES[ident["role"]](ident["name"], ctx, provider=own))
+            names.append(ident["name"])
+        print(color(f"staffed from the hive: {', '.join(names)}", "dim"))
+
+    first = next((a.name for a in agents if a.role == "pi"), agents[0].name)
     mission = Mission(hive, agents, rails, max_rounds=args.max_rounds)
-    mission.kickoff("pi" if "pi" in args.roles else args.roles[0], "goal",
-                    goal=args.goal, start_type=args.from_type,
+    mission.kickoff(first, "goal", goal=args.goal, start_type=args.from_type,
                     goal_type=args.to_type, domain=args.domain)
     result = mission.run()
     print(dumps(result))
@@ -184,6 +204,58 @@ def cmd_ui(args: argparse.Namespace) -> int:
     print(f"  runs {dash.runs}")
     print(f"  hive {dash.hive_root}")
     serve(dash, host=args.host, port=args.port, open_browser=not args.no_open)
+    return 0
+
+
+def provider_for(identity: dict[str, Any]) -> Any:
+    """Build the provider an enrolled agent was hired with."""
+    kind = identity.get("provider", "builtin")
+    if kind in ("builtin", "", None):
+        return None
+    try:
+        p = make_provider(kind, identity.get("model") or None)
+    except Exception as exc:  # noqa: BLE001 - a bad record must not kill the run
+        print(color(f"  {identity['name']}: {exc}", "yellow"))
+        return None
+    if not p.available():
+        why = p.unavailable_reason() if hasattr(p, "unavailable_reason") else "unavailable"
+        print(color(f"  {identity['name']}: {kind} unavailable ({why}); "
+                    f"falling back to deterministic", "yellow"))
+        return None
+    return p
+
+
+def cmd_staff(args: argparse.Namespace) -> int:
+    from .server import Dashboard
+    dash = Dashboard(runs=Path(args.runs), hive_root=Path(args.hive),
+                     capabilities=[Path(p) for p in args.capabilities])
+
+    if args.staff_cmd == "list":
+        roster = dash.hive().roster()
+        if not roster:
+            print("nobody hired yet. Try: bioharness staff hire ada --role planner")
+            return 0
+        print(color(f"{'NAME':<14}{'ROLE':<12}{'PROVIDER':<14}{'MODEL':<20}AUTONOMY", "bold"))
+        for a in roster:
+            print(f"{a['name']:<14}{a.get('role',''):<12}{a.get('provider',''):<14}"
+                  f"{a.get('model') or '-':<20}{a.get('autonomy','-')}")
+        return 0
+
+    if args.staff_cmd == "hire":
+        result = dash.hire(args.name, args.role, args.provider, args.model or "",
+                           args.autonomy)
+        if not result.get("ok"):
+            print(color(f"error: {result['error']}", "red"))
+            return 1
+        print(color(f"hired {args.name} as {args.role} "
+                    f"({args.provider}{'/' + args.model if args.model else ''})", "green"))
+        return 0
+
+    result = dash.fire(args.name)
+    if not result.get("ok"):
+        print(color(f"error: {result['error']}", "red"))
+        return 1
+    print(f"dismissed {args.name}")
     return 0
 
 
@@ -270,12 +342,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     c = sub.add_parser("mission", help="run the agent roster against a goal")
     c.add_argument("goal")
-    c.add_argument("--roles", nargs="+", default=["pi", "planner", "curator"],
-                   choices=sorted(ROLES))
+    c.add_argument("--roles", nargs="+", default=None, choices=sorted(ROLES),
+                   help="override the hive roster for this mission")
     c.add_argument("--from-type", dest="from_type")
     c.add_argument("--to-type", dest="to_type")
     c.add_argument("--domain", "-d")
-    c.add_argument("--provider", help="agent CLI to wrap (claude, codex, gemini, ...)")
+    c.add_argument("--provider",
+                   help="force one provider for every agent: claude-api, or a CLI "
+                        "(claude, codex, gemini, ...)")
     c.add_argument("--model")
     c.add_argument("--max-usd", type=float, default=5.0)
     c.add_argument("--max-rounds", type=int, default=25)
@@ -288,6 +362,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="loopback by default; the dashboard is read-only either way")
     c.add_argument("--no-open", action="store_true", help="do not open a browser")
     c.set_defaults(func=cmd_ui)
+
+    c = sub.add_parser("staff", help="hire, list or dismiss agents")
+    ssub = c.add_subparsers(dest="staff_cmd", required=True)
+    sl = ssub.add_parser("list", help="show the roster")
+    sl.set_defaults(func=cmd_staff)
+    sh = ssub.add_parser("hire", help="add an agent to the hive")
+    sh.add_argument("name")
+    sh.add_argument("--role", required=True, choices=sorted(ROLES))
+    sh.add_argument("--provider", default="builtin",
+                    help="builtin | claude-api | a CLI name")
+    sh.add_argument("--model", default="", help=f"for claude-api: {', '.join(MODELS)}")
+    sh.add_argument("--autonomy", default="bounded",
+                    choices=["read_only", "suggest", "bounded", "full"])
+    sh.set_defaults(func=cmd_staff)
+    sf = ssub.add_parser("fire", help="dismiss an agent (its memory is archived)")
+    sf.add_argument("name")
+    sf.set_defaults(func=cmd_staff)
+    c.set_defaults(func=cmd_staff)
 
     c = sub.add_parser("status", help="show hive and run status")
     c.add_argument("--limit", type=int, default=10)

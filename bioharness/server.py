@@ -141,6 +141,68 @@ class Dashboard:
                            for k in hive.blackboard.keys()],
         }
 
+    ROLES_AVAILABLE = ("pi", "planner", "curator", "validator", "analyst", "scribe")
+
+    def staff_options(self) -> dict[str, Any]:
+        """What the hire form may offer, and whether each backend works here."""
+        from .agents.api_provider import MODELS, APIProvider
+        from .agents.base import PROVIDERS, CLIProvider
+        api = APIProvider()
+        providers = [{"id": "builtin", "label": "builtin (deterministic, free)",
+                      "available": True, "reason": "no LLM calls", "models": []},
+                     {"id": "claude-api", "label": "Claude API",
+                      "available": api.available(),
+                      "reason": "ready" if api.available() else api.unavailable_reason(),
+                      "models": MODELS}]
+        for name in sorted(PROVIDERS):
+            cli = CLIProvider(name)
+            providers.append({"id": name, "label": f"{name} CLI",
+                              "available": cli.available(),
+                              "reason": "on PATH" if cli.available() else "not on PATH",
+                              "models": []})
+        return {"roles": list(self.ROLES_AVAILABLE), "providers": providers,
+                "autonomy": ["read_only", "suggest", "bounded", "full"]}
+
+    NAME_OK = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
+
+    def hire(self, name: str, role: str, provider: str = "builtin",
+             model: str = "", autonomy: str = "bounded") -> dict[str, Any]:
+        from .agents.api_provider import MODELS
+        from .agents.base import PROVIDERS
+        name = (name or "").strip().lower()
+        if not self.NAME_OK.match(name):
+            return {"ok": False, "error": "name must be lowercase letters, digits, "
+                                          "- or _, starting with a letter"}
+        if role not in self.ROLES_AVAILABLE:
+            return {"ok": False, "error": f"unknown role {role!r}; "
+                                          f"pick one of {list(self.ROLES_AVAILABLE)}"}
+        if provider not in ("builtin", "claude-api", *PROVIDERS):
+            return {"ok": False, "error": f"unknown provider {provider!r}"}
+        if provider == "claude-api" and model and model not in MODELS:
+            return {"ok": False, "error": f"unknown model {model!r}"}
+        if autonomy not in ("read_only", "suggest", "bounded", "full"):
+            return {"ok": False, "error": f"unknown autonomy {autonomy!r}"}
+
+        hive = self.hive()
+        if any(a["name"] == name for a in hive.roster()):
+            return {"ok": False, "error": f"{name!r} is already on the roster"}
+
+        # A model only means something for the API provider; storing one for a
+        # builtin or CLI agent just makes the roster lie about what it runs.
+        model = model if provider == "claude-api" else ""
+        identity = hive.enroll(name, role, provider=provider,
+                               model=model, autonomy=autonomy)
+        hive.event("agent.hired", {"name": name, "role": role,
+                                   "provider": provider, "model": model})
+        return {"ok": True, "agent": identity}
+
+    def fire(self, name: str) -> dict[str, Any]:
+        if not self.NAME_OK.match(name or ""):
+            return {"ok": False, "error": "bad agent name"}
+        if self.hive().dismiss(name):
+            return {"ok": True, "dismissed": name}
+        return {"ok": False, "error": f"no agent named {name!r}"}
+
     # The one write path in the whole server: a human dropping a message into
     # an agent's mailbox. Recipient must already be enrolled, topic must be
     # one the roster actually handles.
@@ -303,6 +365,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(d.overview())
         if route == "/api/runs":
             return self._send_json(d.run_list())
+        if route == "/api/staff/options":
+            return self._send_json(d.staff_options())
         if route == "/api/floor":
             return self._send_json(d.floor_state())
         if route == "/api/hive":
@@ -326,16 +390,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
         parsed = urlparse(self.path)
-        if parsed.path != "/api/message":
+        route = parsed.path
+        if route not in ("/api/message", "/api/staff/hire", "/api/staff/fire"):
             return self._send_json({"error": "no such endpoint"}, status=404)
         try:
             length = int(self.headers.get("Content-Length", "0"))
             payload = json.loads(self.rfile.read(length) or b"{}")
         except (ValueError, json.JSONDecodeError) as exc:
             return self._send_json({"ok": False, "error": f"bad JSON: {exc}"}, status=400)
-        result = self.dash.send_message(
-            to=str(payload.get("to", "")), topic=str(payload.get("topic", "goal")),
-            body=payload.get("body") or {})
+
+        if route == "/api/message":
+            result = self.dash.send_message(
+                to=str(payload.get("to", "")), topic=str(payload.get("topic", "goal")),
+                body=payload.get("body") or {})
+        elif route == "/api/staff/hire":
+            result = self.dash.hire(
+                name=str(payload.get("name", "")), role=str(payload.get("role", "")),
+                provider=str(payload.get("provider", "builtin")),
+                model=str(payload.get("model", "")),
+                autonomy=str(payload.get("autonomy", "bounded")))
+        else:
+            result = self.dash.fire(str(payload.get("name", "")))
         return self._send_json(result, status=200 if result.get("ok") else 400)
 
     def _static(self, route: str) -> None:

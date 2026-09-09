@@ -126,7 +126,9 @@ class Agent:
         self.system_prompt = system_prompt or self.__doc__ or ""
         self.workdir = ctx.workdir / name
         self.workdir.mkdir(parents=True, exist_ok=True)
-        self.hive.enroll(name, self.role,
+        # attach, not enroll: joining a mission must never overwrite the
+        # provider and model this agent was hired with.
+        self.hive.attach(name, self.role,
                          provider=(provider.name if provider else "builtin"),
                          autonomy=self.autonomy.value)
 

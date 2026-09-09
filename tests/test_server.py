@@ -270,3 +270,94 @@ def test_ui_assets_are_served(live):
         with urllib.request.urlopen(base + asset, timeout=5) as r:
             assert r.status == 200
             assert kind in r.headers["Content-Type"]
+
+
+# -- staffing --------------------------------------------------------------
+def test_staff_options_lists_roles_providers_and_models(live):
+    _, base, _ = live
+    opt = get(base, "/api/staff/options")
+    assert {"pi", "planner", "curator", "validator", "analyst", "scribe"} <= set(opt["roles"])
+    ids = {p["id"] for p in opt["providers"]}
+    assert {"builtin", "claude-api", "claude"} <= ids
+    api = next(p for p in opt["providers"] if p["id"] == "claude-api")
+    assert "claude-opus-5" in api["models"]
+    assert isinstance(api["available"], bool) and api["reason"]
+
+
+def test_hire_adds_an_agent_to_the_roster(live):
+    dash, base, _ = live
+    status, body = post(base, "/api/staff/hire",
+                        {"name": "ada", "role": "analyst", "provider": "builtin"})
+    assert status == 200 and body["ok"] is True
+    assert any(a["name"] == "ada" for a in dash.hive().roster())
+
+
+def test_hired_agent_keeps_its_provider_and_model(live):
+    dash, base, _ = live
+    post(base, "/api/staff/hire", {"name": "nyx", "role": "planner",
+                                   "provider": "claude-api", "model": "claude-sonnet-5"})
+    nyx = next(a for a in dash.hive().roster() if a["name"] == "nyx")
+    assert nyx["provider"] == "claude-api" and nyx["model"] == "claude-sonnet-5"
+
+
+def test_model_is_not_stored_for_non_api_providers(live):
+    dash, base, _ = live
+    post(base, "/api/staff/hire", {"name": "rex", "role": "scribe",
+                                   "provider": "builtin", "model": "claude-opus-5"})
+    rex = next(a for a in dash.hive().roster() if a["name"] == "rex")
+    assert rex["model"] == "", "a builtin agent must not claim to run a model"
+
+
+@pytest.mark.parametrize("payload,expect", [
+    ({"name": "Bad Name", "role": "planner"}, "lowercase"),
+    ({"name": "9lives", "role": "planner"}, "lowercase"),
+    ({"name": "ok", "role": "wizard"}, "unknown role"),
+    ({"name": "ok", "role": "planner", "provider": "gpt9"}, "unknown provider"),
+    ({"name": "ok", "role": "planner", "autonomy": "godmode"}, "unknown autonomy"),
+])
+def test_hire_validates_its_input(live, payload, expect):
+    _, base, _ = live
+    status, body = post(base, "/api/staff/hire", payload)
+    assert status == 400 and expect in body["error"]
+
+
+def test_hire_refuses_a_duplicate_name(live):
+    _, base, _ = live
+    post(base, "/api/staff/hire", {"name": "dup", "role": "planner"})
+    status, body = post(base, "/api/staff/hire", {"name": "dup", "role": "scribe"})
+    assert status == 400 and "already on the roster" in body["error"]
+
+
+def test_fire_archives_rather_than_deletes(live):
+    dash, base, _ = live
+    post(base, "/api/staff/hire", {"name": "temp", "role": "scribe"})
+    status, body = post(base, "/api/staff/fire", {"name": "temp"})
+    assert status == 200 and body["ok"]
+    assert not any(a["name"] == "temp" for a in dash.hive().roster())
+    archived = list((dash.hive_root / "former").glob("temp-*"))
+    assert archived, "a dismissed agent's memory must be kept"
+    assert (archived[0] / "identity.json").is_file()
+
+
+def test_fire_unknown_agent_is_refused(live):
+    _, base, _ = live
+    status, body = post(base, "/api/staff/fire", {"name": "ghost"})
+    assert status == 400 and "no agent named" in body["error"]
+
+
+def test_attach_does_not_overwrite_how_an_agent_was_hired(live):
+    """A mission joining an agent must not downgrade its stored provider."""
+    dash, base, _ = live
+    post(base, "/api/staff/hire", {"name": "kit", "role": "analyst",
+                                   "provider": "claude-api", "model": "claude-opus-5"})
+    hive = dash.hive()
+    hive.attach("kit", "analyst", provider="builtin", autonomy="bounded")
+    kit = next(a for a in hive.roster() if a["name"] == "kit")
+    assert kit["provider"] == "claude-api" and kit["model"] == "claude-opus-5"
+
+
+def test_attach_creates_the_agent_when_it_is_new(live):
+    dash, _, _ = live
+    hive = dash.hive()
+    hive.attach("fresh", "scribe", provider="builtin")
+    assert any(a["name"] == "fresh" for a in hive.roster())
