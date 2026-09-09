@@ -1,0 +1,179 @@
+{
+  "characters": [
+    "char_senior",
+    "char_tablet",
+    "char_goggles",
+    "char_pipette",
+    "char_hoodie",
+    "char_curly",
+    "char_hijab",
+    "char_casual"
+  ],
+  "frames": {
+    "bench": {
+      "h": 22,
+      "w": 30,
+      "x": 115,
+      "y": 69
+    },
+    "centrifuge": {
+      "h": 30,
+      "w": 18,
+      "x": 140,
+      "y": 36
+    },
+    "chair": {
+      "h": 30,
+      "w": 19,
+      "x": 205,
+      "y": 36
+    },
+    "char_casual": {
+      "h": 34,
+      "w": 15,
+      "x": 119,
+      "y": 1
+    },
+    "char_curly": {
+      "h": 34,
+      "w": 14,
+      "x": 88,
+      "y": 1
+    },
+    "char_goggles": {
+      "h": 34,
+      "w": 15,
+      "x": 32,
+      "y": 1
+    },
+    "char_hijab": {
+      "h": 34,
+      "w": 15,
+      "x": 103,
+      "y": 1
+    },
+    "char_hoodie": {
+      "h": 34,
+      "w": 15,
+      "x": 72,
+      "y": 1
+    },
+    "char_pipette": {
+      "h": 34,
+      "w": 23,
+      "x": 48,
+      "y": 1
+    },
+    "char_senior": {
+      "h": 34,
+      "w": 16,
+      "x": 1,
+      "y": 1
+    },
+    "char_tablet": {
+      "h": 34,
+      "w": 13,
+      "x": 18,
+      "y": 1
+    },
+    "desk_pc": {
+      "h": 27,
+      "w": 30,
+      "x": 53,
+      "y": 69
+    },
+    "door": {
+      "h": 30,
+      "w": 20,
+      "x": 1,
+      "y": 69
+    },
+    "flask_rack": {
+      "h": 28,
+      "w": 30,
+      "x": 22,
+      "y": 69
+    },
+    "floor_grate": {
+      "h": 32,
+      "w": 32,
+      "x": 201,
+      "y": 1
+    },
+    "floor_lino": {
+      "h": 32,
+      "w": 32,
+      "x": 135,
+      "y": 1
+    },
+    "floor_tile": {
+      "h": 32,
+      "w": 32,
+      "x": 168,
+      "y": 1
+    },
+    "floor_wood": {
+      "h": 32,
+      "w": 32,
+      "x": 1,
+      "y": 36
+    },
+    "fume_hood": {
+      "h": 30,
+      "w": 22,
+      "x": 182,
+      "y": 36
+    },
+    "microscope": {
+      "h": 30,
+      "w": 22,
+      "x": 159,
+      "y": 36
+    },
+    "plant": {
+      "h": 30,
+      "w": 17,
+      "x": 225,
+      "y": 36
+    },
+    "sequencer": {
+      "h": 30,
+      "w": 22,
+      "x": 117,
+      "y": 36
+    },
+    "server_rack": {
+      "h": 30,
+      "w": 16,
+      "x": 100,
+      "y": 36
+    },
+    "wall_plain": {
+      "h": 32,
+      "w": 32,
+      "x": 67,
+      "y": 36
+    },
+    "wall_skirting": {
+      "h": 32,
+      "w": 32,
+      "x": 34,
+      "y": 36
+    },
+    "whiteboard": {
+      "h": 26,
+      "w": 30,
+      "x": 84,
+      "y": 69
+    }
+  },
+  "image": "/assets/atlas.png",
+  "tiles": [
+    "floor_lino",
+    "floor_tile",
+    "floor_grate",
+    "floor_wood",
+    "wall_skirting",
+    "wall_plain"
+  ]
+}

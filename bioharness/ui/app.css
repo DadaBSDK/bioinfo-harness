@@ -66,10 +66,11 @@ section { padding: 22px 26px 60px; overflow-x: hidden; }
   display: grid; grid-template-columns: minmax(0, 1fr) 390px;
   grid-template-rows: minmax(0, 1fr) auto; height: calc(100vh - 52px);
 }
-.stage { padding: 16px; overflow: auto; min-width: 0; }
+.stage { padding: 16px; overflow: hidden; min-width: 0; min-height: 0; }
 .stage-inner {
   background: var(--floor); border: 1px solid var(--line); border-radius: 14px;
-  padding: 10px; height: 100%; display: flex; flex-direction: column;
+  padding: 10px; height: 100%; min-height: 0;
+  display: flex; align-items: center; justify-content: center;
 }
 svg.floor { width: 100%; height: 100%; min-height: 420px; display: block; }
 .zone { fill: var(--zone); stroke: var(--floor-line); stroke-width: 1.5; }
@@ -201,3 +202,16 @@ input.search { width: 100%; padding: 9px 12px; border: 1px solid var(--line);
 .kv .k { color: var(--accent); }
 details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding: 4px 0; }
 .msg { border-left: 2px solid var(--line); padding: 4px 0 4px 10px; margin: 6px 0; font-size: 12px; }
+
+/* pixel-art floor: canvas for the art, SVG above it for crisp text.
+   aspect-ratio + max-height letterboxes the lab so it always fits the panel
+   instead of overflowing and cutting reception off the bottom. */
+.floorstage {
+  position: relative; width: 100%; max-width: 100%; max-height: 100%;
+  aspect-ratio: 768 / 512; margin: auto;
+}
+.floorstage canvas {
+  display: block; width: 100%; height: 100%;
+  image-rendering: pixelated; image-rendering: crisp-edges;
+}
+.floorstage .flooroverlay { position: absolute; inset: 0; width: 100%; height: 100%; }

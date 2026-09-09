@@ -32,28 +32,64 @@ async function api(path, options) {
 }
 
 // ==========================================================================
-// The lab floor
+// The lab floor -- pixel art on a canvas, labels on an SVG layer above it
 // ==========================================================================
-// Zones are rooms; each holds up to three stations. Agents are seated by role,
-// and anyone unrecognised gets a free desk in reception rather than vanishing.
+const TILE = 32;
+const COLS = 24, ROWS = 16;
+const FW = COLS * TILE, FH = ROWS * TILE;
+
+const ATLAS = { img: null, frames: null, ready: false };
+
+async function loadAtlas() {
+  try {
+    const idx = await api('/assets/atlas.json');
+    const img = new Image();
+    img.src = idx.image;
+    await img.decode();
+    ATLAS.img = img; ATLAS.frames = idx.frames; ATLAS.ready = true;
+    paintCanvas();          // the first tick may have run before this resolved
+  } catch {
+    ATLAS.ready = false;      // fall back to the flat vector floor
+  }
+}
+
+// Rooms in tile coordinates. `floor` and `props` decide what the room looks
+// like; `roles` decides who works there.
 const ZONES = [
-  { id: 'planning',  label: 'PLANNING OFFICE',  x: 24,  y: 24,  w: 300, h: 196, roles: ['pi', 'planner'] },
-  { id: 'seq',       label: 'SEQUENCING BAY',   x: 340, y: 24,  w: 330, h: 196, roles: ['curator'] },
-  { id: 'qc',        label: 'QC BENCH',         x: 686, y: 24,  w: 268, h: 196, roles: ['validator'] },
-  { id: 'compute',   label: 'COMPUTE CLUSTER',  x: 24,  y: 236, w: 300, h: 196, roles: ['runner', 'orchestrator'] },
-  { id: 'structure', label: 'STRUCTURE LAB',    x: 340, y: 236, w: 330, h: 196, roles: ['analyst'] },
-  { id: 'writeup',   label: 'WRITE-UP DESK',    x: 686, y: 236, w: 268, h: 196, roles: ['scribe'] },
-  { id: 'reception', label: 'RECEPTION',        x: 24,  y: 444, w: 930, h: 144, roles: ['operator'] },
+  { id: 'planning',  label: 'PLANNING OFFICE', x: 1,  y: 1,  w: 7, h: 5,
+    floor: 'floor_wood',  props: ['desk_pc', 'desk_pc', 'whiteboard'], roles: ['pi', 'planner'] },
+  { id: 'seq',       label: 'SEQUENCING BAY',  x: 9,  y: 1,  w: 7, h: 5,
+    floor: 'floor_tile',  props: ['sequencer', 'sequencer', 'bench'],  roles: ['curator'] },
+  { id: 'qc',        label: 'QC BENCH',        x: 17, y: 1,  w: 6, h: 5,
+    floor: 'floor_tile',  props: ['microscope', 'centrifuge'],         roles: ['validator'] },
+  { id: 'compute',   label: 'COMPUTE CLUSTER', x: 1,  y: 7,  w: 7, h: 5,
+    floor: 'floor_grate', props: ['server_rack', 'server_rack', 'server_rack', 'server_rack'],
+    roles: ['runner', 'orchestrator'] },
+  { id: 'structure', label: 'STRUCTURE LAB',   x: 9,  y: 7,  w: 7, h: 5,
+    floor: 'floor_lino',  props: ['fume_hood', 'flask_rack', 'microscope'], roles: ['analyst'] },
+  { id: 'writeup',   label: 'WRITE-UP DESK',   x: 17, y: 7,  w: 6, h: 5,
+    floor: 'floor_wood',  props: ['desk_pc', 'whiteboard'],            roles: ['scribe'] },
+  { id: 'reception', label: 'RECEPTION',       x: 1,  y: 13, w: 22, h: 3,
+    floor: 'floor_lino',  props: ['door', 'plant', 'chair', 'plant'],  roles: ['operator'] },
 ];
+
+// Which sprite plays which role. Anyone unrecognised still gets a body.
+const ROLE_SPRITE = {
+  pi: 'char_senior', planner: 'char_tablet', curator: 'char_goggles',
+  validator: 'char_pipette', analyst: 'char_curly', scribe: 'char_hijab',
+  runner: 'char_hoodie', orchestrator: 'char_hoodie', operator: 'char_casual',
+};
+const SPRITE_POOL = ['char_hoodie', 'char_casual', 'char_curly', 'char_tablet'];
+const spriteFor = a => ROLE_SPRITE[a.role] || SPRITE_POOL[hue(a.name) % SPRITE_POOL.length];
 
 function slots(zone) {
   const n = zone.id === 'reception' ? 6 : 3;
-  const step = zone.w / n;
-  // Reception is a shallower room, so its seats sit lower to keep the status
-  // chip clear of the room label.
-  const lift = zone.id === 'reception' ? 54 : 62;
+  const step = (zone.w * TILE) / n;
+  // Stand one row up from the back of the room: the last row is left free for
+  // the name plate, which otherwise falls off the bottom of the canvas.
+  const y = (zone.y + zone.h - 2) * TILE;
   return Array.from({ length: n }, (_, i) =>
-    ({ x: zone.x + step * (i + 0.5), y: zone.y + zone.h - lift }));
+    ({ x: zone.x * TILE + step * (i + 0.5), y }));
 }
 
 function seat(agents) {
@@ -64,10 +100,112 @@ function seat(agents) {
   agents.forEach(a => {
     const z = zoneFor(a.role);
     const free = slots(z);
-    const i = Math.min(taken[z.id]++, free.length - 1);
-    placed[a.name] = { ...free[i], zone: z.id, agent: a };
+    placed[a.name] = { ...free[Math.min(taken[z.id]++, free.length - 1)],
+                       zone: z.id, agent: a };
   });
   return placed;
+}
+
+function drawSprite(ctx, name, cx, bottom, scale = 1) {
+  const f = ATLAS.frames[name];
+  if (!f) return;
+  const w = f.w * scale, h = f.h * scale;
+  ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h,
+                Math.round(cx - w / 2), Math.round(bottom - h), w, h);
+}
+
+function fillTiles(ctx, name, x, y, w, h) {
+  const f = ATLAS.frames[name] || ATLAS.frames.floor_lino;
+  if (!f) return;
+  for (let ty = 0; ty < h; ty++) {
+    for (let tx = 0; tx < w; tx++) {
+      ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h,
+                    (x + tx) * TILE, (y + ty) * TILE, TILE, TILE);
+    }
+  }
+}
+
+function paintCanvas() {
+  const cv = $('#floorcanvas');
+  if (!cv || !ATLAS.ready) return;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, FW, FH);
+
+  const agents = state.floor?.agents || [];
+  const pos = seat(agents);
+  const staffed = new Set(Object.values(pos).map(p => p.zone));
+
+  for (const z of ZONES) {
+    ctx.globalAlpha = staffed.has(z.id) ? 1 : 0.55;
+    fillTiles(ctx, 'wall_skirting', z.x, z.y, z.w, 1);          // back wall
+    fillTiles(ctx, z.floor, z.x, z.y + 1, z.w, z.h - 1);        // floor
+
+    // Equipment stands against the back wall.
+    const props = z.props || [];
+    const step = (z.w * TILE) / (props.length + 1);
+    props.forEach((prop, i) => {
+      drawSprite(ctx, prop, z.x * TILE + step * (i + 1), (z.y + 2) * TILE);
+    });
+    ctx.globalAlpha = 1;
+  }
+
+  // Painter's algorithm: lower on screen draws later, so nearer people overlap.
+  agents.slice().sort((a, b) => pos[a.name].y - pos[b.name].y).forEach(a => {
+    const p = pos[a.name];
+    drawSprite(ctx, spriteFor(a), p.x, p.y + TILE);
+  });
+}
+
+function floorOverlay() {
+  const f = state.floor;
+  if (!f || !f.agents.length) return '';
+  const pos = seat(f.agents);
+  const staffed = new Set(Object.values(pos).map(p => p.zone));
+
+  const labels = ZONES.map(z => `
+    <text class="zone-label" x="${z.x * TILE + 6}" y="${z.y * TILE + 13}"
+          opacity="${staffed.has(z.id) ? 0.95 : 0.5}">${esc(z.label)}</text>
+    ${staffed.has(z.id) ? '' : `<text class="zone-label" x="${(z.x + z.w) * TILE - 6}"
+      y="${z.y * TILE + 13}" text-anchor="end" opacity=".45">unstaffed</text>`}`).join('');
+
+  const now = Date.now() / 1000;
+  const wires = (f.traffic || []).filter(t => now - t.ts < 30 && pos[t.from] && pos[t.to])
+    .slice(-6).map(t => {
+      const a = pos[t.from], b = pos[t.to];
+      const ax = a.x, ay = a.y + TILE - 40, bx = b.x, by = b.y + TILE - 40;
+      const d = `M${ax},${ay} Q${(ax + bx) / 2},${Math.min(ay, by) - 40} ${bx},${by}`;
+      return `<path class="wire" d="${d}"/>
+        <circle r="3" fill="var(--accent)">
+          <animateMotion dur="1.6s" repeatCount="indefinite" path="${d}"/>
+        </circle>`;
+    }).join('');
+
+  // The sprite's feet are at p.y + TILE and it is CHAR_H tall, so the chip
+  // hangs just above its head and the plate just below its feet.
+  const CHAR_H = 34;
+  const people = f.agents.map(a => {
+    const p = pos[a.name], c = STATUS_COLOR[a.status] || 'var(--skip)';
+    const on = state.agent === a.name;
+    const head = p.y + TILE - CHAR_H;
+    const feet = p.y + TILE;
+    return `<g class="station clickable" data-agent="${esc(a.name)}">
+      ${on ? `<rect x="${p.x - 20}" y="${head - 3}" width="40" height="${CHAR_H + 6}"
+               rx="5" fill="none" stroke="${c}" stroke-width="1.5" opacity=".9"/>` : ''}
+      <rect x="${p.x - 26}" y="${head - 16}" width="52" height="13" rx="3"
+            fill="var(--panel)" stroke="${c}" stroke-width="1" opacity=".95"/>
+      <text x="${p.x}" y="${head - 6}" text-anchor="middle" font-size="8"
+            font-family="var(--mono)" fill="${c}">${esc(a.status)}</text>
+      <rect x="${p.x - 30}" y="${feet + 1}" width="60" height="19" rx="3"
+            fill="var(--panel)" opacity=".85"/>
+      <text class="avatar-name" x="${p.x}" y="${feet + 9}" text-anchor="middle"
+            >${esc(a.name)}</text>
+      <text class="avatar-role" x="${p.x}" y="${feet + 17}" text-anchor="middle"
+            >${esc(a.role)}${a.inbox_pending ? ` · ${a.inbox_pending}` : ''}</text>
+    </g>`;
+  }).join('');
+
+  return labels + wires + people;
 }
 
 function renderFloor() {
@@ -78,74 +216,10 @@ function renderFloor() {
       <code>bioharness mission "call variants in this sample" --roles pi planner curator</code>
       </div>`;
   }
-  const pos = seat(f.agents);
-
-  const staffed = new Set(Object.values(pos).map(p => p.zone));
-  const rooms = ZONES.map(z => {
-    const lit = staffed.has(z.id);
-    return `<g opacity="${lit ? 1 : 0.45}">
-      <rect class="zone" x="${z.x}" y="${z.y}" width="${z.w}" height="${z.h}" rx="12"/>
-      <text class="zone-label" x="${z.x + 14}" y="${z.y + 22}">${esc(z.label)}</text>
-      ${lit ? '' : `<text class="zone-label" x="${z.x + z.w - 14}" y="${z.y + 22}"
-        text-anchor="end" opacity=".8">unstaffed</text>`}
-      ${benches(z)}</g>`;
-  }).join('');
-
-  // Recent inter-agent traffic, drawn as a dotted wire with a travelling dot.
-  const now = Date.now() / 1000;
-  const wires = (f.traffic || []).filter(t => now - t.ts < 30 && pos[t.from] && pos[t.to])
-    .slice(-6).map(t => {
-      const a = pos[t.from], b = pos[t.to];
-      const mx = (a.x + b.x) / 2, my = Math.min(a.y, b.y) - 46;
-      const d = `M${a.x},${a.y - 22} Q${mx},${my} ${b.x},${b.y - 22}`;
-      return `<path class="wire" d="${d}"/>
-        <circle r="3.5" fill="var(--accent)">
-          <animateMotion dur="1.6s" repeatCount="indefinite" path="${d}"/>
-        </circle>`;
-    }).join('');
-
-  const people = f.agents.map(a => {
-    const p = pos[a.name], c = STATUS_COLOR[a.status] || 'var(--skip)';
-    const on = state.agent === a.name;
-    return `<g class="station clickable" data-agent="${esc(a.name)}"
-              transform="translate(${p.x},${p.y})">
-      ${a.status === 'working'
-        ? `<circle class="pulse" r="26" fill="${c}"/>` : ''}
-      <circle class="ring" r="19" fill="${avatarFill(a.name)}"
-              stroke="${c}" stroke-width="${on ? 3.5 : 2.5}"/>
-      <text class="avatar-init" x="0" y="4" text-anchor="middle">${esc(initials(a.name))}</text>
-      <rect x="-34" y="-46" width="68" height="15" rx="4" fill="${c}" opacity=".16"/>
-      <text x="0" y="-35" text-anchor="middle" font-size="9"
-            font-family="var(--mono)" fill="${c}">${esc(a.status)}</text>
-      <text class="avatar-name" x="0" y="36" text-anchor="middle">${esc(a.name)}</text>
-      <text class="avatar-role" x="0" y="47" text-anchor="middle">${esc(a.role)}${
-        a.inbox_pending ? ` · ${a.inbox_pending} mail` : ''}</text>
-    </g>`;
-  }).join('');
-
-  return `<svg class="floor" viewBox="0 0 978 600" preserveAspectRatio="xMidYMid meet">
-    <defs><pattern id="tiles" width="26" height="26" patternUnits="userSpaceOnUse">
-      <path d="M26 0H0V26" fill="none" stroke="var(--floor-line)" stroke-width="1"/>
-    </pattern></defs>
-    <rect width="978" height="600" fill="url(#tiles)" opacity=".5"/>
-    ${rooms}${wires}${people}</svg>`;
-}
-
-// Instrument glyphs, so a room reads as the kind of room it is.
-function benches(z) {
-  if (z.id === 'reception') return '';
-  const bx = z.x + 16, by = z.y + 34, bw = z.w - 32;
-  const bench = `<rect class="bench" x="${bx}" y="${by}" width="${bw}" height="34" rx="6"/>`;
-  const g = [];
-  const kit = { planning: 3, seq: 4, qc: 3, compute: 5, structure: 4, writeup: 2, reception: 6 }[z.id] || 3;
-  for (let i = 0; i < kit; i++) {
-    const x = bx + 16 + i * ((bw - 32) / kit);
-    if (z.id === 'compute') g.push(`<rect class="glyph" x="${x}" y="${by + 6}" width="14" height="22" rx="2"/>`);
-    else if (z.id === 'structure') g.push(`<circle class="glyph" cx="${x + 7}" cy="${by + 17}" r="7"/>`);
-    else if (z.id === 'seq') g.push(`<rect class="glyph" x="${x}" y="${by + 9}" width="20" height="16" rx="3"/>`);
-    else g.push(`<rect class="glyph" x="${x}" y="${by + 11}" width="16" height="12" rx="2"/>`);
-  }
-  return bench + g.join('');
+  return `<div class="floorstage">
+    <canvas id="floorcanvas" width="${FW}" height="${FH}"></canvas>
+    <svg class="flooroverlay" viewBox="0 0 ${FW} ${FH}" preserveAspectRatio="none">${floorOverlay()}</svg>
+  </div>`;
 }
 
 // ==========================================================================
@@ -246,7 +320,12 @@ function paintFloor() {
   $('#cc-sub').innerHTML = head.sub;
   $('#cc-tabs').innerHTML = CC_TABS.map(t =>
     `<button data-cc="${t}" class="${state.cc === t ? 'on' : ''}">${t}</button>`).join('');
-  $('#stage').innerHTML = renderFloor();
+  // Build the stage once; after that only the pixels and the overlay change.
+  // Recreating the canvas every tick threw away the drawing and flickered.
+  const overlay = $('.flooroverlay');
+  if (!overlay) $('#stage').innerHTML = renderFloor();
+  else overlay.innerHTML = floorOverlay();
+  paintCanvas();
   $('#strip').innerHTML = workerStripInner();
 
   // Only repaint the body when nothing inside it is being typed into.
@@ -588,5 +667,5 @@ document.addEventListener('input', async e => {
     : '<div class="empty">nothing remembered about that</div>';
 });
 
-refresh(true);
+loadAtlas().then(() => refresh(true));
 setInterval(() => refresh(), 3000);

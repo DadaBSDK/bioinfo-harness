@@ -77,10 +77,17 @@ bioharness ui --no-open --port 9000
 
 ### floor
 
-The landing view is a lab floor. Each agent is seated at the station its role
-implies — PI and planner in the planning office, curator in the sequencing bay,
-validator at the QC bench, analyst in the structure lab, scribe at the write-up
-desk — and rooms with nobody in them are dimmed and labelled `unstaffed`.
+The landing view is a pixel-art lab floor drawn on a canvas, with the labels and
+status chips on an SVG layer above it so text stays crisp at any zoom. Each
+agent is seated at the station its role implies — PI and planner in the planning
+office, curator in the sequencing bay, validator at the QC bench, analyst in the
+structure lab, scribe at the write-up desk — and rooms with nobody in them are
+dimmed and labelled `unstaffed`.
+
+Rooms are declared as tile-grid rectangles in `ZONES` (in `bioharness/ui/app.js`)
+with a floor tile and a prop list, so adding a room or moving a role is a data
+edit. Artwork lives in `bioharness/ui/assets/` — see the note there on
+regenerating it.
 
 Status is derived, never stored: an agent is `working` while it has acted in the
 last 25s, `awaiting` while it holds unread mail, `blocked` if its last event said
@@ -227,7 +234,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 70 passed
+pytest -q     # 78 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the
