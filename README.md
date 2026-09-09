@@ -167,6 +167,7 @@ work the same mission. `--roles` overrides the roster for one run.
 |---|---|---|
 | `builtin` | Deterministic logic — type-graph planning, path/type curation, QC gates | free |
 | `claude-api` | The Anthropic Messages API via the official SDK | metered, real usage |
+| `gemini-api` | Google's Gemini API with an AI Studio key | metered; tokens recorded, dollars not priced |
 | `ollama` | A model running locally through Ollama | free; nothing leaves the machine |
 | `claude`, `codex`, `gemini`, `qwen`, … | An agent CLI you already have logged in | your subscription |
 
@@ -181,6 +182,24 @@ does not mean there are no credentials, and `bioharness doctor` reports which
 source is in play. **If a provider is unavailable the agent still runs** — it
 falls back to its deterministic behaviour and says so, rather than failing the
 mission.
+
+### Gemini
+
+```bash
+export GEMINI_API_KEY=...       # or GOOGLE_API_KEY / GOOGLE_GENAI_API_KEY
+bioharness staff hire nova --role analyst --provider gemini-api
+```
+
+Model ids are discovered from the API rather than hardcoded, so the hire form
+offers exactly what your key can call and a retired model id cannot rot in the
+source. Naming no model picks the cheapest available tier.
+
+**A Gemini API key is not an Antigravity key.** Google retired the standalone
+Gemini CLI in June 2026 in favour of the Antigravity CLI, which authenticates
+with its own `AV_API_KEY` from the Antigravity dashboard and does not accept a
+Gemini API key. The two are separate providers here: `gemini-api` for the API,
+`antigravity` for the CLI (wrapped like any other agent CLI). The Antigravity
+IDE — the VS Code fork — is an editor and cannot be driven headlessly.
 
 ### Local models
 
@@ -304,7 +323,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 130 passed
+pytest -q     # 149 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

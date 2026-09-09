@@ -171,6 +171,7 @@ class APIProvider:
 def make_provider(kind: str, model: str | None = None, **kw: Any) -> Any:
     """Build a provider by name: `claude-api`, `ollama`, or any CLI provider."""
     from .base import CLIProvider, PROVIDERS
+    from .gemini_provider import GeminiProvider
     from .local_provider import DEFAULT_MODEL as LOCAL_MODEL, OllamaProvider
     if kind in ("claude-api", "api", "anthropic"):
         return APIProvider(model=model or DEFAULT_MODEL,
@@ -178,8 +179,11 @@ def make_provider(kind: str, model: str | None = None, **kw: Any) -> Any:
     if kind in ("ollama", "local"):
         kw.pop("effort", None)
         return OllamaProvider(model=model or LOCAL_MODEL, **kw)
+    if kind in ("gemini-api", "google"):
+        kw.pop("effort", None)
+        return GeminiProvider(model=model or "", **kw)
     if kind in PROVIDERS:
         return CLIProvider(kind, model, **kw)
     raise ProviderUnavailable(
-        f"unknown provider {kind!r}; known: claude-api, ollama, "
+        f"unknown provider {kind!r}; known: claude-api, gemini-api, ollama, "
         f"{', '.join(sorted(PROVIDERS))}")

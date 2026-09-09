@@ -299,6 +299,12 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     detail = (credentials_present()[1] if api.available() else api.unavailable_reason())
     print(f"  {mark} claude-api          {color(detail, 'dim')}")
     print(f"    {color('models: ' + ', '.join(MODELS), 'dim')}")
+    from .agents.gemini_provider import GeminiProvider, available_models
+    gem = available_models()
+    mark = color("✓", "green") if gem else color("✗", "red")
+    detail = (f"{len(gem)} model(s), e.g. {', '.join(gem[:3])}" if gem
+              else GeminiProvider().unavailable_reason())
+    print(f"  {mark} gemini-api          {color(detail, 'dim')}")
     from .agents.local_provider import OllamaProvider, installed_models
     local = installed_models()
     mark = color("✓", "green") if local else color("✗", "red")
@@ -384,7 +390,7 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("name")
     sh.add_argument("--role", required=True, choices=sorted(ROLES))
     sh.add_argument("--provider", default="builtin",
-                    help="builtin | claude-api | ollama | a CLI name")
+                    help="builtin | claude-api | gemini-api | ollama | a CLI name")
     sh.add_argument("--model", default="", help=f"for claude-api: {', '.join(MODELS)}")
     sh.add_argument("--autonomy", default="bounded",
                     choices=["read_only", "suggest", "bounded", "full"])
