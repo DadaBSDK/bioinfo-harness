@@ -35,15 +35,21 @@ async function api(path, options) {
 // The lab floor -- pixel art on a canvas, labels on an SVG layer above it
 // ==========================================================================
 const TILE = 32;
-const FW = 832, FH = 576;
+const FW = 1152, FH = 672;
 const SCALE = 1.5;
-const WALL_H = 60, WALL_W = 64;
 
-// Corridors the staff actually walk down. Rooms open downward onto a lane, and
-// the two lanes are joined by the gaps between rooms.
-const LANE_TOP = 288, LANE_BOTTOM = 500;
-const CONNECTORS = [276, 548];
-const WALK_SPEED = 78;        // px per second
+const WALL_H = 60;      // height of a room's back wall band
+const WT = 12;          // thickness of side and front walls
+const DOOR_W = 48;      // clear width of a doorway
+
+// Corridors. Every room's door opens onto one of these two lanes, and the
+// lanes are joined by the vertical gaps between the room columns.
+const LANE_TOP = 266, LANE_BOTTOM = 534;
+const CONNECTORS = [380, 768];
+const WALK_SPEED = 78;
+
+const WALL_FACE = '#d8d2be';
+const WALL_EDGE = '#333a3f';
 
 const ATLAS = { img: null, frames: null, ready: false };
 
@@ -59,41 +65,52 @@ async function loadAtlas() {
   }
 }
 
+// x/y/w/h describe the room's INTERIOR floor. Walls are built around it, and
+// `doorX` is the centre of the only opening.
 const ROOMS = [
-  { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 248, h: 168,
-    tile: 'floor_wood', roles: ['pi', 'planner'],
-    wall: ['desk_pc', 'desk_pc', 'whiteboard', 'filing_cabinet'],
-    floorProps: [['table', 0.30, 0.92], ['chair', 0.70, 0.90]] },
+  { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 340, h: 156,
+    tile: 'floor_wood', doorSide: 'bottom', doorX: 186, roles: ['pi', 'planner'],
+    wall: ['desk_pc', 'desk_pc', 'whiteboard', 'filing_cabinet', 'clock'],
+    floorProps: [['table', 0.24, 0.86], ['chair', 0.62, 0.84], ['plant', 0.90, 0.86]] },
 
-  { id: 'seq', label: 'SEQUENCING BAY', x: 288, y: 72, w: 248, h: 168,
-    tile: 'floor_tile', counter: true, roles: ['curator'],
-    wall: ['sequencer', 'pcr', 'incubator', 'freezer'],
-    floorProps: [['sink', 0.78, 0.93]] },
+  { id: 'seq', label: 'SEQUENCING BAY', x: 404, y: 72, w: 340, h: 156,
+    tile: 'floor_tile', counter: true, doorSide: 'bottom', doorX: 574,
+    roles: ['curator'],
+    wall: ['sequencer', 'pcr', 'incubator', 'freezer', 'gel_dock'],
+    floorProps: [['sink', 0.22, 0.86], ['bench', 0.72, 0.86]] },
 
-  { id: 'qc', label: 'QC BENCH', x: 560, y: 72, w: 248, h: 168,
-    tile: 'floor_tile', counter: true, roles: ['validator'],
-    wall: ['microscope', 'centrifuge', 'gel_dock', 'shelving'],
-    floorProps: [['flask_rack', 0.76, 0.92]] },
+  { id: 'qc', label: 'QC BENCH', x: 792, y: 72, w: 340, h: 156,
+    tile: 'floor_tile', counter: true, doorSide: 'bottom', doorX: 962,
+    roles: ['validator'],
+    wall: ['microscope', 'centrifuge', 'gel_dock', 'shelving', 'incubator'],
+    floorProps: [['flask_rack', 0.24, 0.86], ['bench', 0.74, 0.86]] },
 
-  { id: 'compute', label: 'COMPUTE CLUSTER', x: 16, y: 320, w: 248, h: 160,
-    tile: 'floor_grate', roles: ['runner', 'orchestrator'],
-    wall: ['server_rack', 'server_rack', 'server_rack', 'server_rack'],
-    floorProps: [['desk_pc', 0.30, 0.94], ['printer', 0.72, 0.92]] },
+  { id: 'compute', label: 'COMPUTE CLUSTER', x: 16, y: 352, w: 340, h: 148,
+    tile: 'floor_grate', doorSide: 'bottom', doorX: 186,
+    roles: ['runner', 'orchestrator'],
+    wall: ['server_rack', 'server_rack', 'server_rack', 'server_rack', 'server_rack'],
+    floorProps: [['desk_pc', 0.24, 0.88], ['printer', 0.58, 0.86], ['filing_cabinet', 0.88, 0.86]] },
 
-  { id: 'structure', label: 'STRUCTURE LAB', x: 288, y: 320, w: 248, h: 160,
-    tile: 'floor_lino', counter: true, roles: ['analyst'],
-    wall: ['fume_hood', 'gel_dock', 'shelving', 'incubator'],
-    floorProps: [['microscope', 0.76, 0.93]] },
+  { id: 'structure', label: 'STRUCTURE LAB', x: 404, y: 352, w: 340, h: 148,
+    tile: 'floor_lino', counter: true, doorSide: 'bottom', doorX: 574,
+    roles: ['analyst'],
+    wall: ['fume_hood', 'gel_dock', 'shelving', 'incubator', 'freezer'],
+    floorProps: [['microscope', 0.24, 0.88], ['bench', 0.74, 0.88]] },
 
-  { id: 'writeup', label: 'WRITE-UP DESK', x: 560, y: 320, w: 248, h: 160,
-    tile: 'floor_wood', roles: ['scribe'],
-    wall: ['desk_pc', 'whiteboard', 'filing_cabinet', 'clock'],
-    floorProps: [['sofa', 0.30, 0.94], ['plant', 0.78, 0.93]] },
+  { id: 'writeup', label: 'WRITE-UP DESK', x: 792, y: 352, w: 340, h: 148,
+    tile: 'floor_wood', doorSide: 'bottom', doorX: 962, roles: ['scribe'],
+    wall: ['desk_pc', 'whiteboard', 'filing_cabinet', 'clock', 'printer'],
+    floorProps: [['sofa', 0.24, 0.88], ['table', 0.56, 0.86], ['plant', 0.88, 0.86]] },
 
-  { id: 'reception', label: 'RECEPTION', x: 16, y: 508, w: 792, h: 44,
-    tile: null, roles: ['operator'], wall: [],
-    floorProps: [['water_cooler', 0.10, 1.0], ['plant', 0.32, 1.0],
-                 ['sofa', 0.54, 1.0], ['plant', 0.76, 1.0], ['chair', 0.93, 1.0]] },
+  // The lobby is a proper enclosed room too; its single door is in the top
+  // wall, opening onto the same lower corridor the labs open onto.
+  { id: 'lobby', label: 'WAITING LOBBY', x: 16, y: 568, w: 1116, h: 80,
+    tile: 'floor_wood', backWall: false, doorSide: 'top', doorX: 574,
+    roles: ['operator'], wall: [],
+    floorProps: [['water_cooler', 0.06, 0.95], ['sofa', 0.18, 0.95],
+                 ['table', 0.29, 0.95], ['plant', 0.40, 0.95],
+                 ['sofa', 0.70, 0.95], ['table', 0.80, 0.95],
+                 ['plant', 0.94, 0.95]] },
 ];
 
 const TOP_ROOMS = ['planning', 'seq', 'qc'];
@@ -102,7 +119,6 @@ const ROLE_SPRITE = {
   validator: 'char_pipette', analyst: 'char_curly', scribe: 'char_hijab',
   runner: 'char_hoodie', orchestrator: 'char_hoodie', operator: 'char_casual',
 };
-// Seated versions exist for most roles; anyone without one simply stands.
 const SIT_SPRITE = {
   pi: 'sit_senior', planner: 'sit_tablet', curator: 'sit_goggles',
   validator: 'sit_pipette', analyst: 'sit_curly',
@@ -113,21 +129,23 @@ const spriteFor = a => ROLE_SPRITE[a.role] || SPRITE_POOL[hue(a.name) % SPRITE_P
 
 function roomById(id) { return ROOMS.find(r => r.id === id); }
 
+// Interior only: the walls are not walkable, so a point inside a wall belongs
+// to no room and gets pushed out to a corridor.
 function roomAt(x, y) {
   return ROOMS.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
 }
 
 function slots(room) {
-  const n = room.id === 'reception' ? 6 : 3;
+  const n = room.id === 'lobby' ? 6 : 3;
   const step = room.w / n;
-  const y = room.y + room.h - (room.id === 'reception' ? 4 : 28);
+  const y = room.y + room.h - (room.id === 'lobby' ? 12 : 24);
   return Array.from({ length: n }, (_, i) => ({ x: room.x + step * (i + 0.5), y }));
 }
 
 function seat(agents) {
   const taken = {}, placed = {};
   ROOMS.forEach(r => (taken[r.id] = 0));
-  const roomFor = role => ROOMS.find(r => r.roles.includes(role)) || roomById('reception');
+  const roomFor = role => ROOMS.find(r => r.roles.includes(role)) || roomById('lobby');
   agents.forEach(a => {
     const r = roomFor(a.role);
     const free = slots(r);
@@ -137,25 +155,61 @@ function seat(agents) {
   return placed;
 }
 
-// -- routing ---------------------------------------------------------------
-const laneFor = roomId => (TOP_ROOMS.includes(roomId) ? LANE_TOP : LANE_BOTTOM);
+// -- doors and routing -----------------------------------------------------
+const laneFor = room => (TOP_ROOMS.includes(room.id) ? LANE_TOP : LANE_BOTTOM);
+const nearestLane = y => (Math.abs(y - LANE_TOP) < Math.abs(y - LANE_BOTTOM)
+                          ? LANE_TOP : LANE_BOTTOM);
 
+/** The two points either side of a room's doorway. */
+function doorPoints(room) {
+  const x = room.doorX;
+  return room.doorSide === 'top'
+    ? { inside: { x, y: room.y + 18 }, outside: { x, y: room.y - WT - 16 } }
+    : { inside: { x, y: room.y + room.h - 16 },
+        outside: { x, y: room.y + room.h + WT + 16 } };
+}
+
+/** Keep a destination somewhere a person could actually stand. */
+function sanitizeTarget(x, y) {
+  const r = roomAt(x, y);
+  if (r) return { x, y };
+  return { x: Math.max(20, Math.min(FW - 20, x)), y: nearestLane(y) };
+}
+
+/**
+ * Walk from one point to another using doors and corridors only -- never
+ * through a wall. Inside a room the route first slides across to the door,
+ * steps out, follows a corridor lane, then enters the target room's door.
+ */
 function buildRoute(fx, fy, tx, ty) {
-  const fromRoom = roomAt(fx, fy), toRoom = roomAt(tx, ty);
-  // Same room, or both loose in the corridor: walk straight there.
-  if (fromRoom === toRoom) return [{ x: tx, y: ty }];
+  const A = roomAt(fx, fy), B = roomAt(tx, ty);
+  if (A === B) return [{ x: tx, y: ty }];
 
   const pts = [];
-  const l1 = fromRoom ? laneFor(fromRoom.id) : (fy < 300 ? LANE_TOP : LANE_BOTTOM);
-  const l2 = toRoom ? laneFor(toRoom.id) : (ty < 300 ? LANE_TOP : LANE_BOTTOM);
+  let lane;
 
-  if (fromRoom) pts.push({ x: fx, y: l1 });          // step out into the corridor
-  if (l1 !== l2) {                                    // change lanes via a gap
-    const cx = CONNECTORS.reduce((a, b) =>
-      Math.abs(b - tx) < Math.abs(a - tx) ? b : a);
-    pts.push({ x: cx, y: l1 }, { x: cx, y: l2 });
+  if (A) {
+    const d = doorPoints(A);
+    pts.push({ x: d.inside.x, y: fy }, d.inside, d.outside);
+    lane = laneFor(A);
+    pts.push({ x: d.outside.x, y: lane });
+  } else {
+    lane = nearestLane(fy);
+    pts.push({ x: fx, y: lane });
   }
-  pts.push({ x: tx, y: l2 }, { x: tx, y: ty });
+
+  const target = B ? laneFor(B) : nearestLane(ty);
+  if (lane !== target) {
+    const cx = CONNECTORS.reduce((a, b) => (Math.abs(b - tx) < Math.abs(a - tx) ? b : a));
+    pts.push({ x: cx, y: lane }, { x: cx, y: target });
+  }
+
+  if (B) {
+    const d = doorPoints(B);
+    pts.push({ x: d.outside.x, y: target }, d.outside, d.inside, { x: tx, y: ty });
+  } else {
+    pts.push({ x: tx, y: target }, { x: tx, y: ty });
+  }
   return pts;
 }
 
@@ -190,7 +244,8 @@ function syncWorld() {
     if (now - t.ts > 45) continue;            // don't replay old history on load
     const from = WORLD.actors[t.from], target = pos[t.to];
     if (!from || !target || t.from === t.to) continue;
-    from.path = buildRoute(from.x, from.y, target.x + 30, target.y);
+    const spot = sanitizeTarget(target.x + 34, target.y);
+    from.path = buildRoute(from.x, from.y, spot.x, spot.y);
     from.errand = { to: t.to, topic: t.topic };
     from.wait = 1.8;
   }
@@ -273,22 +328,59 @@ function tileRect(ctx, name, x, y, w, h) {
   ctx.restore();
 }
 
-function drawWall(ctx, room) {
-  const f = frame('wall_run'), d = frame('wall_door');
-  if (!f) return;
-  const y = room.y - WALL_H;
-  const segments = Math.ceil(room.w / WALL_W);
-  const doorAt = Math.floor(segments / 2);
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(room.x, y, room.w, WALL_H);
-  ctx.clip();
-  for (let i = 0; i < segments; i++) {
-    const piece = (i === doorAt && d) ? d : f;
-    ctx.drawImage(ATLAS.img, piece.x, piece.y, piece.w, piece.h,
-                  room.x + i * WALL_W, y, WALL_W, WALL_H);
+/** A solid wall segment: cream face with a dark edge, matching the tile art. */
+function wallRect(ctx, x, y, w, h) {
+  if (w <= 0 || h <= 0) return;
+  ctx.fillStyle = WALL_EDGE;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = WALL_FACE;
+  ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+}
+
+/** Draws the full enclosure: back band, both sides, and the front wall with
+ *  its doorway gap. The gap is simply not painted, so the corridor floor
+ *  already laid down shows through it. */
+function drawShell(ctx, room) {
+  const { x, y, w, h } = room;
+  const ox = x - WT, ow = w + WT * 2;
+
+  if (room.backWall !== false) {
+    const f = frame('wall_run');
+    if (f) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(ox, y - WALL_H, ow, WALL_H);
+      ctx.clip();
+      for (let i = 0; i * 64 < ow; i++) {
+        ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h, ox + i * 64, y - WALL_H, 64, WALL_H);
+      }
+      ctx.restore();
+    }
   }
-  ctx.restore();
+
+  // Side walls run the full height and tuck into the front wall.
+  wallRect(ctx, ox, y, WT, h + WT);
+  wallRect(ctx, x + w, y, WT, h + WT);
+
+  const gap0 = room.doorX - DOOR_W / 2, gap1 = room.doorX + DOOR_W / 2;
+  const frontY = room.doorSide === 'top' ? y - WT : y + h;
+
+  if (room.doorSide === 'top' && room.backWall === false) {
+    wallRect(ctx, ox, frontY, gap0 - ox, WT);
+    wallRect(ctx, gap1, frontY, ox + ow - gap1, WT);
+  } else if (room.doorSide === 'bottom') {
+    wallRect(ctx, ox, frontY, gap0 - ox, WT);
+    wallRect(ctx, gap1, frontY, ox + ow - gap1, WT);
+  } else {
+    wallRect(ctx, ox, y + h, ow, WT);
+  }
+
+  // Door jambs, so the opening reads as a doorway rather than a missing wall.
+  ctx.fillStyle = WALL_EDGE;
+  ctx.fillRect(gap0 - 2, frontY, 3, WT);
+  ctx.fillRect(gap1 - 1, frontY, 3, WT);
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.fillRect(gap0 + 1, frontY, DOOR_W - 2, 3);   // threshold shadow
 }
 
 function drawCounter(ctx, room) {
@@ -326,11 +418,8 @@ function paintCanvas() {
   for (const room of ROOMS) {
     ctx.globalAlpha = staffed.has(room.id) ? 1 : 0.62;
     if (room.tile) {
-      drawWall(ctx, room);
       tileRect(ctx, room.tile, room.x, room.y, room.w, room.h);
-      ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-      ctx.lineWidth = 1;
-      ctx.strokeRect(room.x + 0.5, room.y + 0.5, room.w - 1, room.h - 1);
+      drawShell(ctx, room);
     }
     if (room.counter) drawCounter(ctx, room);
 
@@ -378,10 +467,12 @@ function floorOverlay() {
   const f = state.floor;
   if (!f || !f.agents.length) return '';
 
-  const labels = ROOMS.map(r => (r.tile
-    ? `<text class="room-label" x="${r.x + 8}" y="${r.y - WALL_H + 15}">${esc(r.label)}</text>`
-    : `<text class="room-label" x="${r.x + r.w - 8}" y="${r.y - 8}" text-anchor="end"
-             opacity=".7">${esc(r.label)}</text>`)).join('');
+  // Rooms with a back wall band get their name on the wall; the lobby has no
+  // band, so its name goes just inside its own front wall.
+  const labels = ROOMS.map(r => (r.backWall === false
+    ? `<text class="room-label" x="${r.x + 10}" y="${r.y + 17}">${esc(r.label)}</text>`
+    : `<text class="room-label" x="${r.x + 8}" y="${r.y - WALL_H + 15}"
+             >${esc(r.label)}</text>`)).join('');
 
   const people = f.agents.map(a => `
     <g class="station clickable" data-agent="${esc(a.name)}" id="actor-${esc(a.name)}">
@@ -474,9 +565,11 @@ function svgPoint(evt, svg) {
 function walkTo(name, x, y) {
   const act = WORLD.actors[name];
   if (!act) return;
-  const bounded = { x: Math.max(12, Math.min(FW - 12, x)),
-                    y: Math.max(40, Math.min(FH - 8, y)) };
-  act.path = buildRoute(act.x, act.y, bounded.x, bounded.y);
+  // Clicking a wall would otherwise ask someone to stand inside it; snap the
+  // destination to the nearest place a person could actually stand.
+  const t = sanitizeTarget(Math.max(12, Math.min(FW - 12, x)),
+                           Math.max(40, Math.min(FH - 8, y)));
+  act.path = buildRoute(act.x, act.y, t.x, t.y);
   act.wait = 2.5;          // linger where sent before drifting back to station
   act.errand = null;
 }

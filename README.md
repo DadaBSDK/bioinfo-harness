@@ -84,14 +84,20 @@ office, curator in the sequencing bay, validator at the QC bench, analyst in the
 structure lab, scribe at the write-up desk — and rooms with nobody in them are
 dimmed and labelled `unstaffed`.
 
-The floor is one continuous building: a corridor surface underneath, rooms with
-tiled floors, and a wall band with a doorway above each. **The staff are
+The floor is one continuous building. Every room is a sealed enclosure — back
+wall band, both side walls, and a front wall broken by exactly one doorway —
+including the waiting lobby along the bottom. Rooms open onto one of two
+corridor lanes, and the lanes are joined by the vertical gaps between the room
+columns. **The staff are
 animated and the floor is interactive:**
 
 - agents sit at their stations when idle, and stand up to walk
 - a routed message becomes an errand — the sender walks to the recipient's
-  desk, pauses there, then heads back, routing out of the room, along a
-  corridor lane and through the gaps between rooms
+  desk, pauses there, then heads back
+- **nobody walks through a wall**: a route slides across to its own room's
+  doorway, steps out, follows a corridor and enters the target room by *its*
+  doorway. `tests/route_check.mjs` samples every room-to-room route and fails
+  if any point lands inside a wall
 - hover highlights an agent; click one to select it (the command center and the
   message box follow the selection)
 - with an agent selected, click anywhere on the floor to send them walking there
@@ -249,7 +255,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 80 passed
+pytest -q     # 82 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

@@ -204,14 +204,15 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding
 .msg { border-left: 2px solid var(--line); padding: 4px 0 4px 10px; margin: 6px 0; font-size: 12px; }
 
 /* pixel-art floor: canvas for the art, SVG above it for crisp text.
-   aspect-ratio + max-height letterboxes the lab so it always fits the panel
-   instead of overflowing and cutting reception off the bottom. */
+   The canvas carries its own intrinsic size, so letting it size itself with
+   max-width/max-height keeps the aspect exact -- forcing width:100% stretched
+   the art horizontally and squashed it vertically. */
 .floorstage {
-  position: relative; width: 100%; max-width: 100%; max-height: 100%;
-  aspect-ratio: 832 / 576; margin: auto;
+  position: relative; display: inline-block; line-height: 0;
+  max-width: 100%; max-height: 100%; margin: auto;
 }
 .floorstage canvas {
-  display: block; width: 100%; height: 100%;
+  display: block; width: auto; height: auto; max-width: 100%; max-height: 100%;
   image-rendering: pixelated; image-rendering: crisp-edges;
 }
 .floorstage .flooroverlay { position: absolute; inset: 0; width: 100%; height: 100%; }

@@ -107,3 +107,34 @@ def test_ui_assets_are_reachable_by_the_server():
     target = (UI_DIR / "assets/atlas.png").resolve()
     assert str(target).startswith(str(UI_DIR.resolve()))
     assert target.is_file()
+
+
+# -- floor geometry --------------------------------------------------------
+def _node_available() -> bool:
+    import shutil
+    return shutil.which("node") is not None
+
+
+@pytest.mark.skipif(not _node_available(), reason="node is not installed")
+def test_no_route_ever_crosses_a_wall():
+    """Characters must enter and leave rooms through doorways only."""
+    import subprocess
+    proc = subprocess.run(["node", str(ROOT / "tests" / "route_check.mjs")],
+                          capture_output=True, text=True, timeout=60)
+    report = json.loads(proc.stdout or "{}")
+    assert report.get("crossings") == 0, (
+        f"routes cut through walls: {report.get('examples')}")
+    assert report.get("samples", 0) > 5000, "the sampler did not actually run"
+    assert proc.returncode == 0, proc.stdout
+
+
+@pytest.mark.skipif(not _node_available(), reason="node is not installed")
+def test_every_room_has_exactly_one_reachable_door():
+    import subprocess
+    proc = subprocess.run(["node", str(ROOT / "tests" / "route_check.mjs")],
+                          capture_output=True, text=True, timeout=60)
+    report = json.loads(proc.stdout or "{}")
+    assert report.get("doorless") == [], f"rooms with no door: {report['doorless']}"
+    assert report.get("misplaced") == [], (
+        f"doorways outside their own wall: {report['misplaced']}")
+    assert report.get("rooms", 0) >= 7
