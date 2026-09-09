@@ -167,6 +167,7 @@ work the same mission. `--roles` overrides the roster for one run.
 |---|---|---|
 | `builtin` | Deterministic logic — type-graph planning, path/type curation, QC gates | free |
 | `claude-api` | The Anthropic Messages API via the official SDK | metered, real usage |
+| `ollama` | A model running locally through Ollama | free; nothing leaves the machine |
 | `claude`, `codex`, `gemini`, `qwen`, … | An agent CLI you already have logged in | your subscription |
 
 The Claude API provider defaults to **`claude-opus-5`** with adaptive thinking,
@@ -180,6 +181,25 @@ does not mean there are no credentials, and `bioharness doctor` reports which
 source is in play. **If a provider is unavailable the agent still runs** — it
 falls back to its deterministic behaviour and says so, rather than failing the
 mission.
+
+### Local models
+
+```bash
+ollama serve &                       # if it is not already running
+bioharness staff hire planner --role planner --provider ollama --model qwen2.5:3b
+```
+
+Local inference costs nothing per call and never sends sequence data or sample
+metadata off the machine, which matters more here than in most domains. The
+provider is stdlib-only — Ollama's HTTP API is small enough that a client
+library would be more dependency than it is worth.
+
+Small models get workflow JSON *roughly* right, so two things guard against
+that: replies truncated mid-structure are repaired rather than discarded, and
+a model-authored workflow is validated before it is published — invented
+capabilities are dropped, `needs` entries that do not name a real earlier step
+are dropped, and what survives must topologically sort. A plan that cannot be
+made runnable is never published.
 
 Every role can be staffed more than once: hire two curators and they take
 neighbouring desks in the sequencing bay.
@@ -284,7 +304,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 110 passed
+pytest -q     # 130 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

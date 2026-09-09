@@ -147,13 +147,21 @@ class Dashboard:
         """What the hire form may offer, and whether each backend works here."""
         from .agents.api_provider import MODELS, APIProvider
         from .agents.base import PROVIDERS, CLIProvider
+        from .agents.local_provider import OllamaProvider, installed_models
         api = APIProvider()
+        local_models = installed_models()
+        ollama = OllamaProvider()
         providers = [{"id": "builtin", "label": "builtin (deterministic, free)",
                       "available": True, "reason": "no LLM calls", "models": []},
                      {"id": "claude-api", "label": "Claude API",
                       "available": api.available(),
                       "reason": "ready" if api.available() else api.unavailable_reason(),
-                      "models": MODELS}]
+                      "models": MODELS},
+                     {"id": "ollama", "label": "Ollama (local, free)",
+                      "available": bool(local_models),
+                      "reason": (f"{len(local_models)} model(s) local"
+                                 if local_models else ollama.unavailable_reason()),
+                      "models": local_models}]
         for name in sorted(PROVIDERS):
             cli = CLIProvider(name)
             providers.append({"id": name, "label": f"{name} CLI",
@@ -169,6 +177,7 @@ class Dashboard:
              model: str = "", autonomy: str = "bounded") -> dict[str, Any]:
         from .agents.api_provider import MODELS
         from .agents.base import PROVIDERS
+        from .agents.local_provider import installed_models
         name = (name or "").strip().lower()
         if not self.NAME_OK.match(name):
             return {"ok": False, "error": "name must be lowercase letters, digits, "
@@ -176,10 +185,16 @@ class Dashboard:
         if role not in self.ROLES_AVAILABLE:
             return {"ok": False, "error": f"unknown role {role!r}; "
                                           f"pick one of {list(self.ROLES_AVAILABLE)}"}
-        if provider not in ("builtin", "claude-api", *PROVIDERS):
+        if provider not in ("builtin", "claude-api", "ollama", *PROVIDERS):
             return {"ok": False, "error": f"unknown provider {provider!r}"}
         if provider == "claude-api" and model and model not in MODELS:
             return {"ok": False, "error": f"unknown model {model!r}"}
+        if provider == "ollama":
+            local = installed_models()
+            if model and model not in local:
+                return {"ok": False,
+                        "error": f"model {model!r} is not pulled; here: {local}"}
+            model = model or (local[0] if local else "")
         if autonomy not in ("read_only", "suggest", "bounded", "full"):
             return {"ok": False, "error": f"unknown autonomy {autonomy!r}"}
 
@@ -189,7 +204,7 @@ class Dashboard:
 
         # A model only means something for the API provider; storing one for a
         # builtin or CLI agent just makes the roster lie about what it runs.
-        model = model if provider == "claude-api" else ""
+        model = model if provider in ("claude-api", "ollama") else ""
         identity = hive.enroll(name, role, provider=provider,
                                model=model, autonomy=autonomy)
         hive.event("agent.hired", {"name": name, "role": role,

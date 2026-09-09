@@ -17,6 +17,7 @@ from typing import Any
 
 from ..core.guardrails import Autonomy
 from ..core.registry import Registry
+from ..core.orchestrator import topo_sort
 from ..core.schemas import Message, Step, Workflow
 from .base import Agent, ProviderUnavailable
 
@@ -127,6 +128,49 @@ class Planner(Agent):
         outs = self.ctx.registry.get(cap_id).outputs
         return outs[0].name if outs else "out"
 
+    def _validate_workflow(self, raw: Any) -> dict[str, Any] | None:
+        """Clean and check a model-authored workflow before it is published.
+
+        Small models get the shape roughly right but the wiring wrong: `needs`
+        comes back holding template strings or port names instead of step ids,
+        and capabilities are occasionally invented. Drop what cannot be true,
+        then require that what survives is a runnable DAG.
+        """
+        if not isinstance(raw, dict) or not isinstance(raw.get("steps"), list):
+            return None
+
+        cleaned: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for i, step in enumerate(raw["steps"]):
+            if not isinstance(step, dict):
+                continue
+            cap = step.get("capability")
+            if cap not in self.ctx.registry:
+                continue                       # invented tool
+            sid = str(step.get("id") or f"step{i + 1}")
+            if sid in seen:
+                sid = f"{sid}_{i}"
+            # A dependency is only real if it names a step we already accepted.
+            needs = [n for n in (step.get("needs") or []) if n in seen]
+            cleaned.append({"id": sid, "capability": cap,
+                            "with": step.get("with") or {},
+                            "params": step.get("params") or {},
+                            "needs": needs,
+                            "description": self.ctx.registry.get(cap).summary})
+            seen.add(sid)
+
+        if not cleaned:
+            return None
+
+        wf = {"name": str(raw.get("name") or "planned-workflow"),
+              "description": str(raw.get("description") or ""),
+              "params": raw.get("params") or {}, "steps": cleaned}
+        try:
+            topo_sort(workflow_from_dict(wf))
+        except Exception:  # noqa: BLE001 - an unusable plan is simply not a plan
+            return None
+        return wf
+
     def _llm_workflow(self, goal: str, domain: str | None) -> dict[str, Any] | None:
         catalogue = "\n".join(
             f"- {c.id} [{c.domain}] {c.summary} | in: "
@@ -137,13 +181,21 @@ class Planner(Agent):
         schema = ('{"name": str, "description": str, "steps": '
                   '[{"id": str, "capability": str, "with": {port: value}, "needs": [str]}]}')
         try:
-            return self.think_json(
+            raw = self.think_json(
                 f"Goal: {goal}\n\nProduce a workflow matching this schema:\n{schema}\n"
-                f"Reference earlier outputs as {{{{ steps.<id>.outputs.<port> }}}} and "
-                f"run parameters as {{{{ params.<name> }}}}.",
+                f"`needs` must contain ONLY ids of earlier steps in this same list. "
+                f"Use only capabilities from the catalogue. Reference earlier outputs "
+                f"as {{{{ steps.<id>.outputs.<port> }}}} and run parameters as "
+                f"{{{{ params.<name> }}}}.",
                 context=f"# Installed capabilities\n{catalogue}")
         except (ProviderUnavailable, ValueError):
             return None
+        wf = self._validate_workflow(raw)
+        if wf is None:
+            self.hive.event("plan.rejected",
+                            {"agent": self.name, "goal": goal,
+                             "reason": "model workflow failed validation"})
+        return wf
 
 
 class Curator(Agent):
@@ -251,11 +303,16 @@ class Analyst(Agent):
         if self.provider is None:
             return {"ok": True, "mode": "descriptive",
                     "summary": _descriptive_summary(artifacts, metrics), "digest": digest}
-        text = self.think(
-            "Interpret these results. Give: (1) what the data show, (2) the main "
-            "caveat, (3) the single most likely technical artefact.",
-            context=json.dumps({"metrics": metrics, "artifacts": digest},
-                               indent=2, default=str)[:12000])
+        try:
+            text = self.think(
+                "Interpret these results. Give: (1) what the data show, (2) the main "
+                "caveat, (3) the single most likely technical artefact.",
+                context=json.dumps({"metrics": metrics, "artifacts": digest},
+                                   indent=2, default=str)[:12000])
+        except ProviderUnavailable as exc:
+            # Losing the LLM should degrade the analysis, not fail the mission.
+            return {"ok": True, "mode": "descriptive", "provider_error": str(exc),
+                    "summary": _descriptive_summary(artifacts, metrics), "digest": digest}
         self.remember(text[:2000], heading=f"analysis {msg.body.get('run_id', '')}")
         return {"ok": True, "mode": "llm", "summary": text}
 

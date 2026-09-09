@@ -135,7 +135,15 @@ class APIProvider:
             retry = exc.response.headers.get("retry-after", "60")
             raise ProviderUnavailable(f"rate limited; retry after {retry}s") from exc
         except anthropic.APIStatusError as exc:
-            raise ProviderUnavailable(f"API error {exc.status_code}: {exc.message}") from exc
+            text = str(getattr(exc, "message", "") or exc)
+            # A valid key on an unfunded account fails here, not at auth. Say so
+            # plainly -- "API error 400" sends people hunting for a bad key.
+            if "credit balance" in text.lower() or "billing" in text.lower():
+                raise ProviderUnavailable(
+                    "the API key is valid but the account has no credit balance "
+                    "(add credit at console.anthropic.com under Plans & Billing)"
+                ) from exc
+            raise ProviderUnavailable(f"API error {exc.status_code}: {text}") from exc
         except anthropic.APIConnectionError as exc:
             raise ProviderUnavailable(f"network error reaching the API: {exc}") from exc
 
@@ -161,12 +169,17 @@ class APIProvider:
 
 
 def make_provider(kind: str, model: str | None = None, **kw: Any) -> Any:
-    """Build a provider by name: `claude-api`, or any CLI provider."""
+    """Build a provider by name: `claude-api`, `ollama`, or any CLI provider."""
     from .base import CLIProvider, PROVIDERS
+    from .local_provider import DEFAULT_MODEL as LOCAL_MODEL, OllamaProvider
     if kind in ("claude-api", "api", "anthropic"):
         return APIProvider(model=model or DEFAULT_MODEL,
                            effort=kw.pop("effort", "high"), **kw)
+    if kind in ("ollama", "local"):
+        kw.pop("effort", None)
+        return OllamaProvider(model=model or LOCAL_MODEL, **kw)
     if kind in PROVIDERS:
         return CLIProvider(kind, model, **kw)
     raise ProviderUnavailable(
-        f"unknown provider {kind!r}; known: claude-api, {', '.join(sorted(PROVIDERS))}")
+        f"unknown provider {kind!r}; known: claude-api, ollama, "
+        f"{', '.join(sorted(PROVIDERS))}")

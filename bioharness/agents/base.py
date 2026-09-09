@@ -166,8 +166,19 @@ class Agent:
             f"# Context\n{context}" if context else "",
             f"# Task\n{prompt}",
         ]))
+        if getattr(self, "_provider_dead", None):
+            raise ProviderUnavailable(self._provider_dead)
         self.ctx.guardrails.budget.check()
-        reply = self.provider.ask(full, cwd=self.workdir)
+        try:
+            reply = self.provider.ask(full, cwd=self.workdir)
+        except ProviderUnavailable as exc:
+            # Remember the failure: retrying a dead provider on every message
+            # just burns the round trip and floods the log with the same error.
+            self._provider_dead = str(exc)
+            self.hive.event("agent.provider_failed",
+                            {"agent": self.name, "provider": self.provider.name,
+                             "reason": str(exc)})
+            raise
         self.ctx.guardrails.budget.charge(tokens=reply.tokens_in + reply.tokens_out,
                                           usd=reply.usd)
         self.hive.charge(self.name, reply.tokens_in, reply.tokens_out, reply.usd,
@@ -234,8 +245,60 @@ class FunctionAgent(Agent):
 _FENCE = re.compile(r"```(?:json)?\s*(.*?)```", re.S)
 
 
+def _bracket_stack(fragment: str) -> list[str] | None:
+    """The still-open brackets in `fragment`, or None if it ends inside a string."""
+    stack: list[str] = []
+    in_string = escaped = False
+    for ch in fragment:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch in "{[":
+            stack.append(ch)
+        elif ch in "}]":
+            if stack:
+                stack.pop()
+    return None if in_string else stack
+
+
+def repair_truncated_json(text: str) -> Any:
+    """Close a JSON document that was cut off mid-structure.
+
+    Small local models routinely hit their token cap one brace short of valid
+    JSON. Rather than discard an otherwise good plan, walk back to the last
+    point that could end a value and close the open brackets from there.
+    """
+    starts = [i for i in (text.find("{"), text.find("[")) if i >= 0]
+    if not starts:
+        return None
+    body = text[min(starts):]
+
+    # Try the full text first, then progressively earlier cut points.
+    cuts = [len(body)]
+    cuts += [i + 1 for i, ch in enumerate(body) if ch in "}],"][::-1][:40]
+
+    for cut in cuts:
+        fragment = body[:cut].rstrip().rstrip(",")
+        stack = _bracket_stack(fragment)
+        if stack is None or not stack:
+            continue          # ended mid-string, or nothing left open to close
+        closed = fragment + "".join("}" if c == "{" else "]" for c in reversed(stack))
+        try:
+            return json.loads(closed)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
 def extract_json(raw: str, fallback: Any = None) -> Any:
-    """Pull a JSON object out of model output that may be fenced or prefaced."""
+    """Pull a JSON object out of model output that may be fenced, prefaced,
+    or truncated."""
     for candidate in (*(m.group(1) for m in _FENCE.finditer(raw)), raw):
         text = candidate.strip()
         try:
@@ -247,7 +310,10 @@ def extract_json(raw: str, fallback: Any = None) -> Any:
                 try:
                     return json.loads(text[start:end + 1])
                 except json.JSONDecodeError:
-                    continue
+                    pass
+            repaired = repair_truncated_json(text)
+            if repaired is not None:
+                return repaired
     if fallback is not None:
         return fallback
     raise ValueError(f"no JSON found in reply: {raw[:200]!r}")
