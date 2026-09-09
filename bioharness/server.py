@@ -88,6 +88,79 @@ class Dashboard:
             "palace": hive.palace.stats(),
         }
 
+    # Status is derived, never stored: an agent is "working" while it holds
+    # mail or has acted recently, "blocked" if its last event said so.
+    WORKING_WINDOW_S = 25.0
+
+    def floor_state(self) -> dict[str, Any]:
+        import time as _time
+        hive = self.hive()
+        events = hive.events(limit=400)
+        now = _time.time()
+
+        last_event: dict[str, dict[str, Any]] = {}
+        for e in events:
+            who = (e.get("payload") or {}).get("agent")
+            if who:
+                last_event[who] = e
+
+        agents = []
+        for ident in hive.roster():
+            name = ident["name"]
+            ev = last_event.get(name)
+            pending = ident.get("inbox_pending", 0)
+            recent = bool(ev and now - ev["ts"] < self.WORKING_WINDOW_S)
+            if ev and ev["event"] in ("agent.blocked", "agent.error"):
+                status = "blocked"
+            elif pending:
+                status = "awaiting"
+            elif recent:
+                status = "working"
+            else:
+                status = "idle"
+            agents.append({
+                **ident, "status": status,
+                "last_event": ev["event"] if ev else None,
+                "last_seen": ev["ts"] if ev else ident.get("enrolled"),
+                "note": (ev.get("payload", {}) or {}).get("reason", "") if ev else "",
+            })
+
+        traffic = [{"from": e["payload"].get("from"), "to": e["payload"].get("to"),
+                    "topic": e["payload"].get("topic"), "ts": e["ts"]}
+                   for e in events if e["event"] == "message.routed"][-25:]
+
+        runs = self.run_list()
+        current = runs[0] if runs else None
+        return {
+            "agents": agents,
+            "traffic": traffic,
+            "activity": events[-80:][::-1],
+            "current_run": current,
+            "cost": hive.cost_ledger(),
+            "blackboard": [{"key": k, **(hive.blackboard.entry(k) or {})}
+                           for k in hive.blackboard.keys()],
+        }
+
+    # The one write path in the whole server: a human dropping a message into
+    # an agent's mailbox. Recipient must already be enrolled, topic must be
+    # one the roster actually handles.
+    ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
+                      "qc.check", "analyze", "report")
+
+    def send_message(self, to: str, topic: str, body: dict[str, Any]) -> dict[str, Any]:
+        hive = self.hive()
+        names = {a["name"] for a in hive.roster()}
+        if to not in names:
+            return {"ok": False, "error": f"no agent named {to!r}; enrolled: {sorted(names)}"}
+        if topic not in self.ALLOWED_TOPICS:
+            return {"ok": False,
+                    "error": f"topic {topic!r} not allowed; use one of {list(self.ALLOWED_TOPICS)}"}
+        if "human" not in names:
+            hive.enroll("human", "operator")
+        msg = hive.send("human", to, topic, body)
+        hive.event("message.queued_by_human", {"to": to, "topic": topic, "id": msg.id})
+        return {"ok": True, "id": msg.id, "to": to, "topic": topic}
+
     def recall(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.hive().palace.search(query, limit=limit) if query else []
 
@@ -230,6 +303,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(d.overview())
         if route == "/api/runs":
             return self._send_json(d.run_list())
+        if route == "/api/floor":
+            return self._send_json(d.floor_state())
         if route == "/api/hive":
             return self._send_json(d.hive_state())
         if route == "/api/caps":
@@ -248,6 +323,20 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_json({"error": f"no such run: {run_id}"}, status=404)
             return self._send_json(detail)
         self._send_json({"error": f"no such endpoint: {route}"}, status=404)
+
+    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+        parsed = urlparse(self.path)
+        if parsed.path != "/api/message":
+            return self._send_json({"error": "no such endpoint"}, status=404)
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+            payload = json.loads(self.rfile.read(length) or b"{}")
+        except (ValueError, json.JSONDecodeError) as exc:
+            return self._send_json({"ok": False, "error": f"bad JSON: {exc}"}, status=400)
+        result = self.dash.send_message(
+            to=str(payload.get("to", "")), topic=str(payload.get("topic", "goal")),
+            body=payload.get("body") or {})
+        return self._send_json(result, status=200 if result.get("ok") else 400)
 
     def _static(self, route: str) -> None:
         rel = "index.html" if route in ("/", "") else route.lstrip("/")

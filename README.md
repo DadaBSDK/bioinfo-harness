@@ -75,22 +75,44 @@ bioharness ui                 # opens http://127.0.0.1:8765
 bioharness ui --no-open --port 9000
 ```
 
-Four views over the same files the CLI writes:
+### floor
+
+The landing view is a lab floor. Each agent is seated at the station its role
+implies — PI and planner in the planning office, curator in the sequencing bay,
+validator at the QC bench, analyst in the structure lab, scribe at the write-up
+desk — and rooms with nobody in them are dimmed and labelled `unstaffed`.
+
+Status is derived, never stored: an agent is `working` while it has acted in the
+last 25s, `awaiting` while it holds unread mail, `blocked` if its last event said
+so, `idle` otherwise. Recent inter-agent messages are drawn as dotted wires with
+a travelling dot, so you can watch a mission move across the floor.
+
+The command center on the right carries the live event stream, the worker
+roster, memory-palace search, the current run's steps, and its DAG. The box at
+the bottom queues a message straight into an agent's mailbox.
+
+### runs / hive / caps / cost
 
 - **runs** — the pipeline as a DAG coloured by live status, the step table,
   parameters, SHA-256 artifact list, and the full provenance ledger. Click any
   step for its `stdout` / `stderr`.
 - **hive** — the roster with autonomy levels, each agent's pending mail and
-  `memory.md`, the blackboard, the event log, and a search box over the memory palace.
+  `memory.md`, the blackboard, the event log, and memory-palace search.
 - **caps** — the registry with a live availability probe and the reason each
   unavailable tool is unavailable.
-- **cost** — token accounting per agent, and the run's budget and breaker state.
+- **cost** — token accounting per agent, plus the run's budget and breaker state.
 
-It is **read-only and loopback-bound**: every endpoint reads files, none writes
-one, and the hive is *peeked* rather than consumed, so watching a mission never
-eats its mail. Point it at a cluster run over `ssh -L 8765:127.0.0.1:8765`.
-Stdlib `http.server` and one vanilla HTML file — no JS toolchain on the
-analysis box.
+### What the dashboard may do
+
+It is loopback-bound and reads files for everything. There is exactly **one**
+write path: `POST /api/message`, which drops a message into an agent's mailbox.
+The recipient must already be enrolled and the topic must be one the roster
+actually handles, so the box cannot be used to inject arbitrary work. Reads
+never mutate: the hive is *peeked* rather than consumed, so watching a mission
+never eats its mail.
+
+Point it at a cluster run over `ssh -L 8765:127.0.0.1:8765`. Stdlib
+`http.server` plus three static files — no JS toolchain on the analysis box.
 
 ## Run the agents
 
@@ -205,7 +227,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 61 passed
+pytest -q     # 70 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

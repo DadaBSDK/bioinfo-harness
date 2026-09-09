@@ -183,3 +183,90 @@ def test_missing_paths_do_not_crash(tmp_path: Path):
     assert dash.run_list() == []
     assert dash.overview()["runs"]["total"] == 0
     assert dash.hive_state()["agents"] == []
+
+
+# -- floor state -----------------------------------------------------------
+def test_floor_state_seats_and_statuses_agents(live):
+    _, base, _ = live
+    f = get(base, "/api/floor")
+    by = {a["name"]: a for a in f["agents"]}
+    assert set(by) >= {"pi", "planner"}
+    # planner is holding the message pi sent it
+    assert by["planner"]["status"] == "awaiting"
+    assert by["planner"]["inbox_pending"] == 1
+    assert all("role" in a and "status" in a for a in f["agents"])
+
+
+def test_floor_state_reports_traffic_and_activity(live):
+    _, base, _ = live
+    f = get(base, "/api/floor")
+    assert any(t["from"] == "pi" and t["to"] == "planner" for t in f["traffic"])
+    assert f["activity"] and f["current_run"]["status"] == "ok"
+
+
+def test_idle_agent_when_nothing_pending(live):
+    dash, base, _ = live
+    dash.hive().mailbox("planner").read(consume=True)     # drain the mail
+    f = get(base, "/api/floor")
+    planner = next(a for a in f["agents"] if a["name"] == "planner")
+    assert planner["status"] in ("idle", "working")       # never "awaiting" now
+    assert planner["inbox_pending"] == 0
+
+
+# -- the one write path ----------------------------------------------------
+def post(base: str, path: str, payload: dict):
+    req = urllib.request.Request(
+        base + path, data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as exc:
+        return exc.code, json.loads(exc.read())
+
+
+def test_message_reaches_the_agent_mailbox(live):
+    dash, base, _ = live
+    status, body = post(base, "/api/message",
+                        {"to": "pi", "topic": "goal", "body": {"goal": "call variants"}})
+    assert status == 200 and body["ok"] is True
+    msgs = dash.hive().mailbox("pi").peek()
+    assert any(m.topic == "goal" and m.body.get("goal") == "call variants" for m in msgs)
+
+
+def test_message_to_unknown_agent_is_refused(live):
+    _, base, _ = live
+    status, body = post(base, "/api/message", {"to": "nobody", "topic": "goal", "body": {}})
+    assert status == 400 and body["ok"] is False
+    assert "no agent named" in body["error"]
+
+
+def test_message_with_disallowed_topic_is_refused(live):
+    dash, base, _ = live
+    status, body = post(base, "/api/message",
+                        {"to": "pi", "topic": "rm -rf", "body": {}})
+    assert status == 400 and "not allowed" in body["error"]
+    assert dash.hive().mailbox("pi").pending() == 0
+
+
+def test_malformed_json_is_refused(live):
+    _, base, _ = live
+    req = urllib.request.Request(base + "/api/message", data=b"{not json",
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(req, timeout=5)
+    assert exc.value.code == 400
+
+
+def test_post_to_other_endpoints_is_refused(live):
+    _, base, _ = live
+    status, _ = post(base, "/api/runs", {})
+    assert status == 404
+
+
+def test_ui_assets_are_served(live):
+    _, base, _ = live
+    for asset, kind in (("/app.css", "text/css"), ("/app.js", "javascript")):
+        with urllib.request.urlopen(base + asset, timeout=5) as r:
+            assert r.status == 200
+            assert kind in r.headers["Content-Type"]
