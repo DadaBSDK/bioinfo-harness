@@ -9,7 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .agents.api_provider import APIProvider, MODELS, make_provider
+from .agents.api_provider import (APIProvider, MODELS, credentials_present,
+                                  make_provider)
 from .agents.base import AgentContext, CLIProvider
 from .agents.roles import ROLES, plan_by_types
 from .core.guardrails import Budget, Guardrails
@@ -293,11 +294,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         if not ok:
             missing.append(cap.id)
     print(f"\n{color('AGENT PROVIDERS', 'bold')}")
+    api = APIProvider()
+    mark = color("✓", "green") if api.available() else color("✗", "red")
+    detail = (credentials_present()[1] if api.available() else api.unavailable_reason())
+    print(f"  {mark} claude-api          {color(detail, 'dim')}")
+    print(f"    {color('models: ' + ', '.join(MODELS), 'dim')}")
     from .agents.base import PROVIDERS
     for name in sorted(PROVIDERS):
         p = CLIProvider(name)
         mark = color("✓", "green") if p.available() else color("✗", "dim")
-        print(f"  {mark} {name}")
+        reason = "on PATH" if p.available() else "not on PATH"
+        print(f"  {mark} {name:<19} {color(reason, 'dim')}")
     print(f"\n{len(reg) - len(missing)}/{len(reg)} capabilities usable here.")
     return 0
 
