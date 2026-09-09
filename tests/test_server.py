@@ -1,0 +1,185 @@
+"""Dashboard server tests.
+
+The dashboard must be strictly read-only and must never crash the run it is
+watching, so these cover the failure paths as much as the happy ones.
+"""
+from __future__ import annotations
+
+import json
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from bioharness.core.guardrails import Guardrails
+from bioharness.core.hive import Hive
+from bioharness.core.loader import workflow_from_dict
+from bioharness.core.orchestrator import Orchestrator
+from bioharness.core.registry import Registry, capability_from_dict
+from bioharness.core.workspace import Workspace
+from bioharness.server import Dashboard, serve
+
+ECHO = {
+    "id": "make_text", "domain": "test", "summary": "write a file",
+    "runtime": {"kind": "binary", "binary": "sh"},
+    "command": "sh -c 'echo hi > {{ outdir }}/out.txt'",
+    "inputs": [], "outputs": [{"name": "text", "type": "text", "glob": "out.txt"}],
+}
+UPPER = {
+    "id": "upper", "domain": "test", "summary": "uppercase",
+    "runtime": {"kind": "binary", "binary": "sh"},
+    "command": "sh -c 'tr a-z A-Z < {{ inputs.text }} > {{ outdir }}/upper.txt'",
+    "inputs": [{"name": "text", "type": "text"}],
+    "outputs": [{"name": "loud", "type": "shout", "glob": "upper.txt"}],
+}
+
+WORKFLOW = {"name": "demo", "steps": [
+    {"id": "make", "capability": "make_text"},
+    {"id": "shout", "capability": "upper", "needs": ["make"],
+     "with": {"text": "{{ steps.make.outputs.text }}"}}]}
+
+
+@pytest.fixture
+def live(tmp_path: Path):
+    """A dashboard over one completed run and a populated hive."""
+    reg = Registry()
+    for raw in (ECHO, UPPER):
+        reg.register(capability_from_dict(raw))
+
+    runs, hive_root = tmp_path / "runs", tmp_path / "hive"
+    hive = Hive(hive_root)
+    hive.enroll("planner", "planner")
+    hive.enroll("pi", "pi")
+    hive.send("pi", "planner", "plan.request", {"goal": "call variants"})
+    hive.blackboard.put("qc/last", {"verdict": "pass"}, agent="validator")
+    hive.append_memory("planner", "Routed fastq to vcf via bwa_mem.")
+    hive.charge("planner", tokens_in=800, tokens_out=200, usd=0.015)
+
+    orch = Orchestrator(reg, Workspace(runs), Guardrails(), hive)
+    summary = orch.run(workflow_from_dict(WORKFLOW))
+
+    caps = tmp_path / "caps"
+    caps.mkdir()
+    (caps / "test.yaml").write_text(json.dumps({"capabilities": [ECHO, UPPER]}))
+
+    dash = Dashboard(runs, hive_root, [caps])
+    server = serve(dash, port=0, block=False)
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    yield dash, base, summary
+    server.shutdown()
+    server.server_close()
+
+
+def get(base: str, path: str):
+    with urllib.request.urlopen(base + path, timeout=5) as r:
+        return json.loads(r.read())
+
+
+# -- reading state ---------------------------------------------------------
+def test_overview_counts_runs_and_capabilities(live):
+    _, base, _ = live
+    o = get(base, "/api/overview")
+    assert o["runs"]["total"] == 1 and o["runs"]["ok"] == 1
+    assert o["capabilities"]["total"] == 2
+    assert o["agents"] == 2
+
+
+def test_run_list_reports_status(live):
+    _, base, summary = live
+    runs = get(base, "/api/runs")
+    assert len(runs) == 1
+    assert runs[0]["run_id"] == summary["run_id"]
+    assert runs[0]["status"] == "ok"
+    assert runs[0]["steps"] == 2          # graph recorded in run.json
+
+
+def test_run_detail_exposes_graph_tasks_and_hashes(live):
+    _, base, summary = live
+    d = get(base, f"/api/runs/{summary['run_id']}")
+    assert [s["id"] for s in d["graph"]] == ["make", "shout"]
+    assert d["graph"][1]["needs"] == ["make"]
+    assert {t["step"] for t in d["tasks"]} == {"make", "shout"}
+    assert len(d["artifacts"][0]["sha256"]) == 64
+    assert d["ledger"]
+
+
+def test_run_log_returns_step_output(live):
+    _, base, summary = live
+    log = get(base, f"/api/runs/{summary['run_id']}/log?step=make&stream=stdout")
+    assert log["exists"] is True
+
+
+def test_hive_state_includes_mail_blackboard_and_cost(live):
+    _, base, _ = live
+    h = get(base, "/api/hive")
+    planner = next(a for a in h["agents"] if a["name"] == "planner")
+    assert planner["inbox"][0]["topic"] == "plan.request"
+    assert planner["inbox_pending"] == 1       # peeked, never consumed
+    assert any(e["key"] == "qc/last" for e in h["blackboard"])
+    assert h["cost"]["total_usd"] == pytest.approx(0.015)
+
+
+def test_dashboard_does_not_consume_mail(live):
+    dash, base, _ = live
+    get(base, "/api/hive")
+    get(base, "/api/hive")
+    assert dash.hive().mailbox("planner").pending() == 1
+
+
+def test_caps_reports_availability(live):
+    _, base, _ = live
+    caps = get(base, "/api/caps")
+    assert {c["id"] for c in caps} == {"make_text", "upper"}
+    assert all(c["available"] for c in caps)
+
+
+def test_recall_searches_the_palace(live):
+    _, base, _ = live
+    hits = get(base, "/api/recall?q=fastq")
+    assert hits and "bwa_mem" in hits[0]["text"]
+
+
+def test_index_html_is_served(live):
+    _, base, _ = live
+    with urllib.request.urlopen(base + "/", timeout=5) as r:
+        body = r.read().decode()
+    assert "Bioinfo" in body and r.headers["Content-Type"].startswith("text/html")
+
+
+# -- failure paths ---------------------------------------------------------
+def test_unknown_run_returns_404(live):
+    _, base, _ = live
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        get(base, "/api/runs/run-does-not-exist")
+    assert exc.value.code == 404
+
+
+def test_unknown_endpoint_returns_404(live):
+    _, base, _ = live
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        get(base, "/api/nope")
+    assert exc.value.code == 404
+
+
+def test_path_traversal_is_refused(live):
+    _, base, _ = live
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(base + "/../../../etc/passwd", timeout=5)
+    assert exc.value.code == 404
+
+
+def test_bad_run_identifier_is_rejected_before_touching_disk(live):
+    dash, _, _ = live
+    assert dash.run_detail("../../etc") is None
+    assert dash.run_log("../../etc", "passwd")["error"] == "bad identifier"
+
+
+def test_missing_paths_do_not_crash(tmp_path: Path):
+    dash = Dashboard(tmp_path / "no-runs", tmp_path / "no-hive", [tmp_path / "no-caps"])
+    assert dash.run_list() == []
+    assert dash.overview()["runs"]["total"] == 0
+    assert dash.hive_state()["agents"] == []

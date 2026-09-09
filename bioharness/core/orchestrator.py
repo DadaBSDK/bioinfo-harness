@@ -60,8 +60,15 @@ class Orchestrator:
     def run(self, workflow: Workflow, params: dict[str, Any] | None = None,
             stop_on_failure: bool = True) -> dict[str, Any]:
         merged = {**workflow.params, **(params or {})}
-        self.ws.create({"workflow": workflow.name, "description": workflow.description,
-                        "params": merged, "dry_run": self.rails.dry_run})
+        self.ws.create({
+            "workflow": workflow.name, "description": workflow.description,
+            "params": merged, "dry_run": self.rails.dry_run,
+            # The DAG shape is recorded up front so a reader (the UI, an audit)
+            # can draw the graph even if the run dies halfway through.
+            "graph": [{"id": s.id, "capability": s.capability, "needs": s.needs,
+                       "scatter": s.scatter, "description": s.description}
+                      for s in workflow.steps],
+        })
         self._event("workflow.started", {"workflow": workflow.name, "run_id": self.ws.run_id,
                                          "steps": len(workflow.steps)})
 

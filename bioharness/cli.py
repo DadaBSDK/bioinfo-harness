@@ -176,6 +176,17 @@ def cmd_mission(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    from .server import Dashboard, serve
+    dash = Dashboard(runs=Path(args.runs), hive_root=Path(args.hive),
+                     capabilities=[Path(p) for p in args.capabilities])
+    print(color("Bioinfo Harness dashboard", "bold"))
+    print(f"  runs {dash.runs}")
+    print(f"  hive {dash.hive_root}")
+    serve(dash, host=args.host, port=args.port, open_browser=not args.no_open)
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     hive = Hive(args.hive)
     print(color("HIVE", "bold"))
@@ -270,6 +281,13 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--max-rounds", type=int, default=25)
     c.add_argument("--dry-run", action="store_true")
     c.set_defaults(func=cmd_mission)
+
+    c = sub.add_parser("ui", help="serve the local dashboard")
+    c.add_argument("--port", type=int, default=8765)
+    c.add_argument("--host", default="127.0.0.1",
+                   help="loopback by default; the dashboard is read-only either way")
+    c.add_argument("--no-open", action="store_true", help="do not open a browser")
+    c.set_defaults(func=cmd_ui)
 
     c = sub.add_parser("status", help="show hive and run status")
     c.add_argument("--limit", type=int, default=10)

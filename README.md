@@ -68,6 +68,30 @@ bioharness run wgs-variants --dry-run \
 bioharness run md-stability --dry-run --set pdb_id=1AKI
 ```
 
+## The dashboard
+
+```bash
+bioharness ui                 # opens http://127.0.0.1:8765
+bioharness ui --no-open --port 9000
+```
+
+Four views over the same files the CLI writes:
+
+- **runs** — the pipeline as a DAG coloured by live status, the step table,
+  parameters, SHA-256 artifact list, and the full provenance ledger. Click any
+  step for its `stdout` / `stderr`.
+- **hive** — the roster with autonomy levels, each agent's pending mail and
+  `memory.md`, the blackboard, the event log, and a search box over the memory palace.
+- **caps** — the registry with a live availability probe and the reason each
+  unavailable tool is unavailable.
+- **cost** — token accounting per agent, and the run's budget and breaker state.
+
+It is **read-only and loopback-bound**: every endpoint reads files, none writes
+one, and the hive is *peeked* rather than consumed, so watching a mission never
+eats its mail. Point it at a cluster run over `ssh -L 8765:127.0.0.1:8765`.
+Stdlib `http.server` and one vanilla HTML file — no JS toolchain on the
+analysis box.
+
 ## Run the agents
 
 ```bash
@@ -181,17 +205,17 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 47 passed
+pytest -q     # 61 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the
 harness mechanics — binding, DAG ordering, scatter, retries, provenance hashing,
-budgets, breakers, mailbox routing — on any machine, with no bioinformatics tool
+budgets, breakers, mailbox routing, and the dashboard API — on any machine, with no bioinformatics tool
 installed.
 
 ## Status
 
-Working core. Not yet built: HPC submission (Slurm/SGE executor backends),
-encrypted cross-machine transport for the mailbox layer, and a UI.
+Working core and dashboard. Not yet built: HPC submission (Slurm/SGE executor
+backends) and encrypted cross-machine transport for the mailbox layer.
 
 MIT.

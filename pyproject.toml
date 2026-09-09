@@ -21,5 +21,8 @@ bioharness = "bioharness.cli:main"
 [tool.setuptools.packages.find]
 include = ["bioharness*"]
 
+[tool.setuptools.package-data]
+bioharness = ["ui/*.html", "ui/*.css", "ui/*.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
