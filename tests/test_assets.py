@@ -61,9 +61,8 @@ def test_every_sprite_the_ui_asks_for_exists(atlas):
 
     referenced: set[str] = set()
     # ROLE_SPRITE / SPRITE_POOL / props lists / explicit fillTiles calls
-    referenced |= set(re.findall(r"'(char_[a-z_]+)'", js))
-    referenced |= set(re.findall(r"'(floor_[a-z_]+)'", js))
-    referenced |= set(re.findall(r"'(wall_[a-z_]+)'", js))
+    for prefix in ("char_", "sit_", "floor_", "wall_", "counter_"):
+        referenced |= set(re.findall(rf"'({prefix}[a-z_]+)'", js))
     for key in ("wall", "floorProps"):
         for block in re.findall(rf"{key}:\s*\[(.*?)\],?\s*\}}", js, re.S):
             referenced |= set(re.findall(r"'([a-z_]+)'", block))
@@ -71,6 +70,14 @@ def test_every_sprite_the_ui_asks_for_exists(atlas):
     assert referenced, "found no sprite references in app.js — did the scrape break?"
     missing = sorted(referenced - frames)
     assert not missing, f"app.js references sprites missing from the atlas: {missing}"
+
+
+def test_every_seated_sprite_has_a_standing_counterpart(atlas):
+    """The renderer falls back to standing when an agent is walking, so a
+    seated sprite without its standing twin would pop between two people."""
+    frames = set(atlas["frames"])
+    for name in (n for n in frames if n.startswith("sit_")):
+        assert name.replace("sit_", "char_") in frames, f"{name} has no standing sprite"
 
 
 def test_characters_tiles_and_walls_are_catalogued(atlas):

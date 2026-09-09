@@ -85,7 +85,20 @@ structure lab, scribe at the write-up desk — and rooms with nobody in them are
 dimmed and labelled `unstaffed`.
 
 The floor is one continuous building: a corridor surface underneath, rooms with
-tiled floors, and a wall band with a doorway above each. Rooms are declared as
+tiled floors, and a wall band with a doorway above each. **The staff are
+animated and the floor is interactive:**
+
+- agents sit at their stations when idle, and stand up to walk
+- a routed message becomes an errand — the sender walks to the recipient's
+  desk, pauses there, then heads back, routing out of the room, along a
+  corridor lane and through the gaps between rooms
+- hover highlights an agent; click one to select it (the command center and the
+  message box follow the selection)
+- with an agent selected, click anywhere on the floor to send them walking there
+
+Movement is driven by real events from the hive, not a screensaver: if nothing
+is happening, nobody moves.
+ Rooms are declared as
 pixel rects in `ROOMS` (in `bioharness/ui/app.js`) with a floor tile, a list of
 equipment lining the back wall and a list of furniture standing on the floor —
 so adding a room or moving a role is a data edit, not a rendering change.
@@ -236,7 +249,7 @@ bioharness recall "coverage gate" # search the memory palace
 ## Tests
 
 ```bash
-pytest -q     # 79 passed
+pytest -q     # 80 passed
 ```
 
 The suite builds its capabilities out of `sh`, `tr` and `echo`, so it proves the

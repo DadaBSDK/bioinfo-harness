@@ -35,9 +35,15 @@ async function api(path, options) {
 // The lab floor -- pixel art on a canvas, labels on an SVG layer above it
 // ==========================================================================
 const TILE = 32;
-const FW = 832, FH = 576;   // tall enough for reception's name plates
-const SCALE = 1.5;            // sprites are ~34px native; 1.5x reads at this size
+const FW = 832, FH = 576;
+const SCALE = 1.5;
 const WALL_H = 60, WALL_W = 64;
+
+// Corridors the staff actually walk down. Rooms open downward onto a lane, and
+// the two lanes are joined by the gaps between rooms.
+const LANE_TOP = 288, LANE_BOTTOM = 500;
+const CONNECTORS = [276, 548];
+const WALK_SPEED = 78;        // px per second
 
 const ATLAS = { img: null, frames: null, ready: false };
 
@@ -48,65 +54,72 @@ async function loadAtlas() {
     img.src = idx.image;
     await img.decode();
     ATLAS.img = img; ATLAS.frames = idx.frames; ATLAS.ready = true;
-    paintCanvas();          // the first tick may have run before this resolved
   } catch {
-    ATLAS.ready = false;    // the floor simply stays empty rather than erroring
+    ATLAS.ready = false;
   }
 }
 
-// Rooms are pixel rects inside one continuous building. `wall` props line the
-// back wall, `floor` props stand out on the floor, and `roles` decides who
-// works here. Everything else -- corridor, walls, doors -- is derived.
 const ROOMS = [
-  { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 256, h: 168,
+  { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 248, h: 168,
     tile: 'floor_wood', roles: ['pi', 'planner'],
     wall: ['desk_pc', 'desk_pc', 'whiteboard', 'filing_cabinet'],
-    floorProps: [['table', 0.30, 0.92], ['chair', 0.66, 0.90]] },
+    floorProps: [['table', 0.30, 0.92], ['chair', 0.70, 0.90]] },
 
-  { id: 'seq', label: 'SEQUENCING BAY', x: 288, y: 72, w: 256, h: 168,
-    tile: 'floor_tile', roles: ['curator'],
+  { id: 'seq', label: 'SEQUENCING BAY', x: 288, y: 72, w: 248, h: 168,
+    tile: 'floor_tile', counter: true, roles: ['curator'],
     wall: ['sequencer', 'pcr', 'incubator', 'freezer'],
-    floorProps: [['bench', 0.30, 0.94], ['sink', 0.72, 0.92]] },
+    floorProps: [['sink', 0.78, 0.93]] },
 
-  { id: 'qc', label: 'QC BENCH', x: 560, y: 72, w: 256, h: 168,
-    tile: 'floor_tile', roles: ['validator'],
+  { id: 'qc', label: 'QC BENCH', x: 560, y: 72, w: 248, h: 168,
+    tile: 'floor_tile', counter: true, roles: ['validator'],
     wall: ['microscope', 'centrifuge', 'gel_dock', 'shelving'],
-    floorProps: [['bench', 0.34, 0.94], ['flask_rack', 0.72, 0.92]] },
+    floorProps: [['flask_rack', 0.76, 0.92]] },
 
-  { id: 'compute', label: 'COMPUTE CLUSTER', x: 16, y: 320, w: 256, h: 160,
+  { id: 'compute', label: 'COMPUTE CLUSTER', x: 16, y: 320, w: 248, h: 160,
     tile: 'floor_grate', roles: ['runner', 'orchestrator'],
     wall: ['server_rack', 'server_rack', 'server_rack', 'server_rack'],
-    floorProps: [['desk_pc', 0.34, 0.94], ['printer', 0.72, 0.92]] },
+    floorProps: [['desk_pc', 0.30, 0.94], ['printer', 0.72, 0.92]] },
 
-  { id: 'structure', label: 'STRUCTURE LAB', x: 288, y: 320, w: 256, h: 160,
-    tile: 'floor_lino', roles: ['analyst'],
+  { id: 'structure', label: 'STRUCTURE LAB', x: 288, y: 320, w: 248, h: 160,
+    tile: 'floor_lino', counter: true, roles: ['analyst'],
     wall: ['fume_hood', 'gel_dock', 'shelving', 'incubator'],
-    floorProps: [['bench', 0.32, 0.94], ['microscope', 0.72, 0.93]] },
+    floorProps: [['microscope', 0.76, 0.93]] },
 
-  { id: 'writeup', label: 'WRITE-UP DESK', x: 560, y: 320, w: 256, h: 160,
+  { id: 'writeup', label: 'WRITE-UP DESK', x: 560, y: 320, w: 248, h: 160,
     tile: 'floor_wood', roles: ['scribe'],
     wall: ['desk_pc', 'whiteboard', 'filing_cabinet', 'clock'],
-    floorProps: [['sofa', 0.32, 0.94], ['plant', 0.76, 0.93]] },
+    floorProps: [['sofa', 0.30, 0.94], ['plant', 0.78, 0.93]] },
 
-  // Reception has no back wall: it is the corridor the other rooms open onto.
-  { id: 'reception', label: 'RECEPTION', x: 16, y: 508, w: 800, h: 44,
+  { id: 'reception', label: 'RECEPTION', x: 16, y: 508, w: 792, h: 44,
     tile: null, roles: ['operator'], wall: [],
-    floorProps: [['water_cooler', 0.09, 1.0], ['plant', 0.30, 1.0],
-                 ['sofa', 0.52, 1.0], ['plant', 0.74, 1.0], ['chair', 0.92, 1.0]] },
+    floorProps: [['water_cooler', 0.10, 1.0], ['plant', 0.32, 1.0],
+                 ['sofa', 0.54, 1.0], ['plant', 0.76, 1.0], ['chair', 0.93, 1.0]] },
 ];
 
+const TOP_ROOMS = ['planning', 'seq', 'qc'];
 const ROLE_SPRITE = {
   pi: 'char_senior', planner: 'char_tablet', curator: 'char_goggles',
   validator: 'char_pipette', analyst: 'char_curly', scribe: 'char_hijab',
   runner: 'char_hoodie', orchestrator: 'char_hoodie', operator: 'char_casual',
 };
+// Seated versions exist for most roles; anyone without one simply stands.
+const SIT_SPRITE = {
+  pi: 'sit_senior', planner: 'sit_tablet', curator: 'sit_goggles',
+  validator: 'sit_pipette', analyst: 'sit_curly',
+  runner: 'sit_hoodie', orchestrator: 'sit_hoodie',
+};
 const SPRITE_POOL = ['char_hoodie', 'char_casual', 'char_curly', 'char_tablet'];
 const spriteFor = a => ROLE_SPRITE[a.role] || SPRITE_POOL[hue(a.name) % SPRITE_POOL.length];
+
+function roomById(id) { return ROOMS.find(r => r.id === id); }
+
+function roomAt(x, y) {
+  return ROOMS.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
+}
 
 function slots(room) {
   const n = room.id === 'reception' ? 6 : 3;
   const step = room.w / n;
-  // Stand in the lower half of the room, clear of the equipment along the wall.
   const y = room.y + room.h - (room.id === 'reception' ? 4 : 28);
   return Array.from({ length: n }, (_, i) => ({ x: room.x + step * (i + 0.5), y }));
 }
@@ -114,8 +127,7 @@ function slots(room) {
 function seat(agents) {
   const taken = {}, placed = {};
   ROOMS.forEach(r => (taken[r.id] = 0));
-  const roomFor = role => ROOMS.find(r => r.roles.includes(role)) ||
-                          ROOMS.find(r => r.id === 'reception');
+  const roomFor = role => ROOMS.find(r => r.roles.includes(role)) || roomById('reception');
   agents.forEach(a => {
     const r = roomFor(a.role);
     const free = slots(r);
@@ -125,6 +137,98 @@ function seat(agents) {
   return placed;
 }
 
+// -- routing ---------------------------------------------------------------
+const laneFor = roomId => (TOP_ROOMS.includes(roomId) ? LANE_TOP : LANE_BOTTOM);
+
+function buildRoute(fx, fy, tx, ty) {
+  const fromRoom = roomAt(fx, fy), toRoom = roomAt(tx, ty);
+  // Same room, or both loose in the corridor: walk straight there.
+  if (fromRoom === toRoom) return [{ x: tx, y: ty }];
+
+  const pts = [];
+  const l1 = fromRoom ? laneFor(fromRoom.id) : (fy < 300 ? LANE_TOP : LANE_BOTTOM);
+  const l2 = toRoom ? laneFor(toRoom.id) : (ty < 300 ? LANE_TOP : LANE_BOTTOM);
+
+  if (fromRoom) pts.push({ x: fx, y: l1 });          // step out into the corridor
+  if (l1 !== l2) {                                    // change lanes via a gap
+    const cx = CONNECTORS.reduce((a, b) =>
+      Math.abs(b - tx) < Math.abs(a - tx) ? b : a);
+    pts.push({ x: cx, y: l1 }, { x: cx, y: l2 });
+  }
+  pts.push({ x: tx, y: l2 }, { x: tx, y: ty });
+  return pts;
+}
+
+// -- the world -------------------------------------------------------------
+const WORLD = { actors: {}, seen: new Set(), raf: 0, last: 0, hover: null };
+
+function syncWorld() {
+  const agents = state.floor?.agents || [];
+  const pos = seat(agents);
+
+  for (const a of agents) {
+    const home = pos[a.name];
+    let act = WORLD.actors[a.name];
+    if (!act) {
+      act = WORLD.actors[a.name] = { x: home.x, y: home.y, path: [], facing: 1,
+                                     wait: 0, moving: false, errand: null };
+    }
+    act.agent = a;
+    act.home = home;
+  }
+  for (const name of Object.keys(WORLD.actors)) {
+    if (!pos[name]) delete WORLD.actors[name];
+  }
+
+  // A routed message becomes an errand: the sender walks over, pauses at the
+  // recipient's desk, then heads back. The animation is driven by real events.
+  const now = Date.now() / 1000;
+  for (const t of state.floor?.traffic || []) {
+    const key = `${t.from}>${t.to}@${t.ts}`;
+    if (WORLD.seen.has(key)) continue;
+    WORLD.seen.add(key);
+    if (now - t.ts > 45) continue;            // don't replay old history on load
+    const from = WORLD.actors[t.from], target = pos[t.to];
+    if (!from || !target || t.from === t.to) continue;
+    from.path = buildRoute(from.x, from.y, target.x + 30, target.y);
+    from.errand = { to: t.to, topic: t.topic };
+    from.wait = 1.8;
+  }
+}
+
+function stepWorld(dt) {
+  for (const act of Object.values(WORLD.actors)) {
+    if (act.path.length) {
+      const t = act.path[0];
+      const dx = t.x - act.x, dy = t.y - act.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 2.5) {
+        act.path.shift();
+        if (!act.path.length) act.arrived = performance.now();
+      } else {
+        act.x += (dx / d) * WALK_SPEED * dt;
+        act.y += (dy / d) * WALK_SPEED * dt;
+        if (Math.abs(dx) > 0.7) act.facing = dx < 0 ? -1 : 1;
+      }
+      act.moving = true;
+    } else if (act.wait > 0) {
+      act.wait -= dt;
+      act.moving = false;
+    } else {
+      act.moving = false;
+      act.errand = null;
+      const h = act.home;
+      if (h && Math.hypot(h.x - act.x, h.y - act.y) > 4) {
+        act.path = buildRoute(act.x, act.y, h.x, h.y);   // wander back to station
+      }
+    }
+  }
+}
+
+const atHome = act => act.home && !act.moving && act.wait <= 0 &&
+                      Math.hypot(act.home.x - act.x, act.home.y - act.y) < 5;
+
+// -- drawing ---------------------------------------------------------------
 function frame(name) { return ATLAS.frames?.[name]; }
 
 function shadow(ctx, cx, y, w) {
@@ -136,13 +240,22 @@ function shadow(ctx, cx, y, w) {
   ctx.restore();
 }
 
-function drawSprite(ctx, name, cx, bottom, scale = SCALE, withShadow = true) {
+function drawSprite(ctx, name, cx, bottom, opts = {}) {
   const f = frame(name);
   if (!f) return;
+  const scale = opts.scale ?? SCALE;
   const w = Math.round(f.w * scale), h = Math.round(f.h * scale);
-  if (withShadow) shadow(ctx, cx, bottom, w);
-  ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h,
-                Math.round(cx - w / 2), Math.round(bottom - h), w, h);
+  if (opts.shadow !== false) shadow(ctx, cx, bottom, w);
+  const x = Math.round(cx - w / 2), y = Math.round(bottom - h);
+  if (opts.flip) {
+    ctx.save();
+    ctx.translate(x + w, y);
+    ctx.scale(-1, 1);
+    ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h, 0, 0, w, h);
+    ctx.restore();
+  } else {
+    ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h, x, y, w, h);
+  }
 }
 
 function tileRect(ctx, name, x, y, w, h) {
@@ -165,7 +278,7 @@ function drawWall(ctx, room) {
   if (!f) return;
   const y = room.y - WALL_H;
   const segments = Math.ceil(room.w / WALL_W);
-  const doorAt = Math.floor(segments / 2);      // one doorway per room, centred
+  const doorAt = Math.floor(segments / 2);
   ctx.save();
   ctx.beginPath();
   ctx.rect(room.x, y, room.w, WALL_H);
@@ -178,6 +291,24 @@ function drawWall(ctx, room) {
   ctx.restore();
 }
 
+function drawCounter(ctx, room) {
+  // Only the middle section is a straight run -- the supplied end caps are
+  // L-shaped corner pieces and read as stray blocks in a straight wall.
+  const m = frame('counter_m');
+  if (!m) return;
+  const sc = 1.15;
+  const mw = Math.round(m.w * sc), h = Math.round(m.h * sc);
+  const bottom = room.y + 84;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(room.x + 2, room.y, room.w - 4, room.h);
+  ctx.clip();
+  for (let x = room.x + 2; x < room.x + room.w - 2; x += mw) {
+    ctx.drawImage(ATLAS.img, m.x, m.y, m.w, m.h, x, bottom - h, mw, h);
+  }
+  ctx.restore();
+}
+
 function paintCanvas() {
   const cv = $('#floorcanvas');
   if (!cv || !ATLAS.ready) return;
@@ -185,15 +316,12 @@ function paintCanvas() {
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, FW, FH);
 
-  // Corridor floor everywhere first, so rooms sit in a building rather than
-  // floating in a void -- that emptiness was the worst part of the old floor.
   tileRect(ctx, 'floor_lino', 0, 0, FW, FH);
   ctx.fillStyle = 'rgba(0,0,0,0.20)';
   ctx.fillRect(0, 0, FW, FH);
 
-  const agents = state.floor?.agents || [];
-  const pos = seat(agents);
-  const staffed = new Set(Object.values(pos).map(p => p.room));
+  const actors = Object.values(WORLD.actors);
+  const staffed = new Set(actors.map(a => a.home?.room));
 
   for (const room of ROOMS) {
     ctx.globalAlpha = staffed.has(room.id) ? 1 : 0.62;
@@ -204,73 +332,104 @@ function paintCanvas() {
       ctx.lineWidth = 1;
       ctx.strokeRect(room.x + 0.5, room.y + 0.5, room.w - 1, room.h - 1);
     }
+    if (room.counter) drawCounter(ctx, room);
 
-    // Equipment stands against the back wall...
     const wall = room.wall || [];
     const step = room.w / (wall.length + 1);
     wall.forEach((prop, i) => {
-      drawSprite(ctx, prop, room.x + step * (i + 1), room.y + 54);
+      drawSprite(ctx, prop, room.x + step * (i + 1),
+                 room.y + (room.counter ? 52 : 54), { shadow: !room.counter });
     });
-    // ...and a little furniture stands out on the floor.
     (room.floorProps || []).forEach(([prop, fx, fy]) => {
       drawSprite(ctx, prop, room.x + room.w * fx, room.y + room.h * fy);
     });
     ctx.globalAlpha = 1;
   }
 
-  // Painter's algorithm: people lower on screen draw last.
-  agents.slice().sort((a, b) => pos[a.name].y - pos[b.name].y).forEach(a => {
-    const p = pos[a.name];
-    drawSprite(ctx, spriteFor(a), p.x, p.y);
+  // Highlight the room under the cursor / the selected agent's room.
+  const focusRoom = WORLD.hover ? WORLD.actors[WORLD.hover]?.home?.room
+                                : WORLD.actors[state.agent]?.home?.room;
+  const fr = focusRoom && roomById(focusRoom);
+  if (fr && fr.tile) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(111,191,149,0.9)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(fr.x + 1, fr.y + 1, fr.w - 2, fr.h - 2);
+    ctx.restore();
+  }
+
+  actors.sort((a, b) => a.y - b.y).forEach(act => {
+    const seated = atHome(act) && SIT_SPRITE[act.agent.role];
+    const name = seated || spriteFor(act.agent);
+    // A walking figure bobs; a seated one does not.
+    const bob = act.moving ? Math.round(Math.sin(performance.now() / 90) * 1.2) : 0;
+    drawSprite(ctx, name, act.x, act.y + bob,
+               { flip: !seated && act.facing < 0 });
   });
 }
 
 const CHAR_H = 34 * SCALE;
 
+// -- overlay ---------------------------------------------------------------
+// Built once per roster change with coordinates relative to each actor, then
+// moved every frame with a transform -- rebuilding this at 60fps would be
+// wasteful and would kill the browser's text rendering cache.
 function floorOverlay() {
   const f = state.floor;
   if (!f || !f.agents.length) return '';
-  const pos = seat(f.agents);
-  const staffed = new Set(Object.values(pos).map(p => p.room));
 
-  // Walled rooms label the wall itself; reception has no wall, so its label
-  // goes to the right where it cannot sit under the first agent's chip.
   const labels = ROOMS.map(r => (r.tile
-    ? `<text class="room-label" x="${r.x + 8}" y="${r.y - WALL_H + 15}"
-             opacity="${staffed.has(r.id) ? 1 : 0.55}">${esc(r.label)}</text>`
+    ? `<text class="room-label" x="${r.x + 8}" y="${r.y - WALL_H + 15}">${esc(r.label)}</text>`
     : `<text class="room-label" x="${r.x + r.w - 8}" y="${r.y - 8}" text-anchor="end"
              opacity=".7">${esc(r.label)}</text>`)).join('');
 
+  const people = f.agents.map(a => `
+    <g class="station clickable" data-agent="${esc(a.name)}" id="actor-${esc(a.name)}">
+      <rect class="hit" x="-16" y="${-CHAR_H}" width="32" height="${CHAR_H + 6}"/>
+      <rect class="sel" x="-20" y="${-CHAR_H - 4}" width="40" height="${CHAR_H + 10}" rx="5"/>
+      <circle class="pip" cx="-20" cy="${-CHAR_H - 8}" r="3.5"/>
+      <text class="pix-status" x="-13" y="${-CHAR_H - 5}"></text>
+      <text class="pix-name" x="0" y="13" text-anchor="middle"></text>
+    </g>`).join('');
+
+  return `<rect class="floorhit" x="0" y="0" width="${FW}" height="${FH}"/>
+          <g class="wires"></g>${labels}${people}`;
+}
+
+function paintOverlay() {
+  const svg = $('.flooroverlay');
+  if (!svg) return;
+
+  for (const [name, act] of Object.entries(WORLD.actors)) {
+    const g = svg.querySelector(`#actor-${CSS.escape(name)}`);
+    if (!g) continue;
+    g.setAttribute('transform', `translate(${act.x.toFixed(1)},${act.y.toFixed(1)})`);
+    const c = STATUS_COLOR[act.agent.status] || 'var(--skip)';
+    const status = act.errand ? `→ ${act.errand.to}` : act.agent.status;
+    g.querySelector('.pix-status').textContent = status;
+    g.querySelector('.pix-status').setAttribute('fill', c);
+    g.querySelector('.pip').setAttribute('fill', c);
+    g.querySelector('.pix-name').textContent =
+      act.agent.name + (act.agent.inbox_pending ? ` (${act.agent.inbox_pending})` : '');
+    const sel = g.querySelector('.sel');
+    const on = state.agent === name || WORLD.hover === name;
+    sel.setAttribute('stroke', on ? c : 'transparent');
+    g.classList.toggle('on', state.agent === name);
+  }
+
+  // Wires are redrawn each frame because their endpoints are moving.
+  const wires = svg.querySelector('.wires');
+  if (!wires) return;
   const now = Date.now() / 1000;
-  const wires = (f.traffic || []).filter(t => now - t.ts < 30 && pos[t.from] && pos[t.to])
-    .slice(-6).map(t => {
-      const a = pos[t.from], b = pos[t.to];
+  wires.innerHTML = (state.floor?.traffic || [])
+    .filter(t => now - t.ts < 20 && WORLD.actors[t.from] && WORLD.actors[t.to])
+    .slice(-4).map(t => {
+      const a = WORLD.actors[t.from], b = WORLD.actors[t.to];
       const ay = a.y - CHAR_H, by = b.y - CHAR_H;
-      const d = `M${a.x},${ay} Q${(a.x + b.x) / 2},${Math.min(ay, by) - 44} ${b.x},${by}`;
-      return `<path class="wire" d="${d}"/>
-        <circle r="3" fill="var(--accent)">
-          <animateMotion dur="1.6s" repeatCount="indefinite" path="${d}"/>
-        </circle>`;
+      const d = `M${a.x.toFixed(1)},${ay.toFixed(1)} Q${((a.x + b.x) / 2).toFixed(1)},${
+        (Math.min(ay, by) - 44).toFixed(1)} ${b.x.toFixed(1)},${by.toFixed(1)}`;
+      return `<path class="wire" d="${d}"/>`;
     }).join('');
-
-  // Labels are outlined text rather than boxes -- the old plates covered more
-  // of the art than they explained.
-  const people = f.agents.map(a => {
-    const p = pos[a.name], c = STATUS_COLOR[a.status] || 'var(--skip)';
-    const on = state.agent === a.name;
-    const head = p.y - CHAR_H;
-    return `<g class="station clickable" data-agent="${esc(a.name)}">
-      ${on ? `<rect x="${p.x - 22}" y="${head - 5}" width="44" height="${CHAR_H + 8}"
-               rx="5" fill="none" stroke="${c}" stroke-width="1.5" opacity=".95"/>` : ''}
-      <circle cx="${p.x - 20}" cy="${head - 7}" r="3.5" fill="${c}"/>
-      <text class="pix-status" x="${p.x - 13}" y="${head - 4}" fill="${c}"
-            >${esc(a.status)}</text>
-      <text class="pix-name" x="${p.x}" y="${p.y + 13}" text-anchor="middle"
-            >${esc(a.name)}${a.inbox_pending ? ` (${a.inbox_pending})` : ''}</text>
-    </g>`;
-  }).join('');
-
-  return labels + wires + people;
 }
 
 function renderFloor() {
@@ -288,6 +447,52 @@ function renderFloor() {
   </div>`;
 }
 
+// -- the loop --------------------------------------------------------------
+function tickWorld(ts) {
+  WORLD.raf = requestAnimationFrame(tickWorld);
+  const dt = Math.min(0.05, (ts - WORLD.last) / 1000 || 0);
+  WORLD.last = ts;
+  if (state.tab !== 'floor' || !ATLAS.ready) return;
+  stepWorld(dt);
+  paintCanvas();
+  paintOverlay();
+}
+
+function startWorld() {
+  if (!WORLD.raf) WORLD.raf = requestAnimationFrame(tickWorld);
+}
+
+// -- pointer ---------------------------------------------------------------
+function svgPoint(evt, svg) {
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX;
+  pt.y = evt.clientY;
+  const ctm = svg.getScreenCTM();
+  return ctm ? pt.matrixTransform(ctm.inverse()) : null;
+}
+
+function walkTo(name, x, y) {
+  const act = WORLD.actors[name];
+  if (!act) return;
+  const bounded = { x: Math.max(12, Math.min(FW - 12, x)),
+                    y: Math.max(40, Math.min(FH - 8, y)) };
+  act.path = buildRoute(act.x, act.y, bounded.x, bounded.y);
+  act.wait = 2.5;          // linger where sent before drifting back to station
+  act.errand = null;
+}
+
+document.addEventListener('mousemove', e => {
+  const svg = e.target.closest?.('.flooroverlay');
+  if (!svg) { WORLD.hover = null; return; }
+  const p = svgPoint(e, svg);
+  if (!p) return;
+  let best = null, bestD = 26;
+  for (const [name, act] of Object.entries(WORLD.actors)) {
+    const d = Math.hypot(act.x - p.x, (act.y - CHAR_H / 2) - p.y);
+    if (d < bestD) { bestD = d; best = name; }
+  }
+  WORLD.hover = best;
+});
 // ==========================================================================
 // Command center
 // ==========================================================================
@@ -388,10 +593,17 @@ function paintFloor() {
     `<button data-cc="${t}" class="${state.cc === t ? 'on' : ''}">${t}</button>`).join('');
   // Build the stage once; after that only the pixels and the overlay change.
   // Recreating the canvas every tick threw away the drawing and flickered.
+  syncWorld();
+  // Rebuild the overlay only when the roster changes; the animation loop moves
+  // the existing groups every frame.
   const overlay = $('.flooroverlay');
-  if (!overlay) $('#stage').innerHTML = renderFloor();
-  else overlay.innerHTML = floorOverlay();
+  const roster = (state.floor?.agents || []).map(a => a.name).join(',');
+  if (!overlay || $('#stage').dataset.roster !== roster) {
+    $('#stage').innerHTML = renderFloor();
+    $('#stage').dataset.roster = roster;
+  }
   paintCanvas();
+  paintOverlay();
   $('#strip').innerHTML = workerStripInner();
 
   // Only repaint the body when nothing inside it is being typed into.
@@ -711,6 +923,16 @@ document.addEventListener('click', e => {
     const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
     return render();
   }
+  if (e.target.classList?.contains('floorhit')) {
+    const svg = e.target.ownerSVGElement;
+    const p = svg && svgPoint(e, svg);
+    if (!p) return;
+    // With someone selected, clicking the floor sends them walking there.
+    // With nobody selected, it just clears the selection.
+    if (state.agent && WORLD.actors[state.agent]) return walkTo(state.agent, p.x, p.y);
+    state.agent = null;
+    return render();
+  }
   const run = e.target.closest('[data-run]');
   if (run) { state.runId = run.dataset.run; state.log = null; return refresh(); }
   const step = e.target.closest('[data-step]');
@@ -733,5 +955,5 @@ document.addEventListener('input', async e => {
     : '<div class="empty">nothing remembered about that</div>';
 });
 
-loadAtlas().then(() => refresh(true));
+loadAtlas().then(() => { refresh(true); startWorld(); });
 setInterval(() => refresh(), 3000);

@@ -51,6 +51,13 @@ SHEETS: dict[str, dict] = {
         "max": 34,
         "kind": "sprite",
     },
+    "seated.png": {
+        "names": ["sit_senior", "sit_tablet", "sit_goggles", "sit_pipette",
+                  "sit_hoodie", "sit_curly", None, None,
+                  "counter_l", "counter_m", None, "counter_r"],
+        "height": 42,          # people-at-desks and counter runs share a height
+        "kind": "sprite",
+    },
     "tiles.png": {
         "names": ["floor_lino", "floor_tile", "floor_grate",
                   "floor_wood", None, "wall_skirting",

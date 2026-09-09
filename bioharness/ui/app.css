@@ -229,3 +229,11 @@ details summary { cursor: pointer; color: var(--muted); font-size: 12px; padding
   font: 600 9px var(--mono); text-transform: uppercase;
   stroke: rgba(0,0,0,.85); stroke-width: 2.5px; paint-order: stroke fill;
 }
+
+/* floor interaction */
+.flooroverlay { pointer-events: auto; }
+.floorhit { fill: transparent; cursor: crosshair; }
+.station { cursor: pointer; }
+.station .hit { fill: transparent; }
+.station .sel { fill: none; stroke: transparent; stroke-width: 1.5; }
+.station.on .pix-name { fill: var(--accent); }
