@@ -4,7 +4,10 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +16,7 @@ from .agents.api_provider import (APIProvider, MODELS, credentials_present,
                                   make_provider)
 from .agents.base import AgentContext, CLIProvider
 from .agents.roles import ROLES, plan_by_types
-from .core.guardrails import Budget, Guardrails
+from .core.guardrails import Budget, Guardrails, GuardrailTripped
 from .core.hive import Hive
 from .core.loader import find_workflow, load_workflow
 from .core.orchestrator import Mission, Orchestrator
@@ -161,7 +164,8 @@ def cmd_mission(args: argparse.Namespace) -> int:
     hive = Hive(args.hive)
     rails = Guardrails(budget=Budget(max_usd=args.max_usd), dry_run=args.dry_run)
     ctx = AgentContext(hive=hive, registry=reg, guardrails=rails,
-                       workdir=Path(args.hive).parent / "agents")
+                       workdir=Path(args.hive).parent / "agents",
+                       runs=Path(args.runs))
     provider = make_provider(args.provider, args.model) if args.provider else None
     if provider and not provider.available():
         why = (provider.unavailable_reason() if hasattr(provider, "unavailable_reason")
@@ -213,6 +217,138 @@ def cmd_mission(args: argparse.Namespace) -> int:
     return 0
 
 
+def roster_agents(hive: Hive, ctx: AgentContext) -> list[Any]:
+    """Instantiate whoever is hired, each with the provider it was hired with."""
+    return [ROLES[a["role"]](a["name"], ctx, provider=provider_for(a))
+            for a in hive.roster() if a.get("role") in ROLES]
+
+
+def roster_key(hive: Hive) -> str:
+    """Changes when someone is hired, fired or pointed at another backend."""
+    return ",".join(sorted(
+        f"{a['name']}:{a.get('role', '')}:{a.get('provider', '')}:{a.get('model', '')}"
+        for a in hive.roster()))
+
+
+def welcome(hive: Hive, agents: list[Any], newcomer: str, quiet: bool = False) -> None:
+    """Everyone downs tools and says hello to the new arrival."""
+    role = next((a.get("role", "") for a in hive.roster()
+                 if a["name"] == newcomer), "")
+    greeters = [a for a in agents if a.name != newcomer]
+    for agent in greeters:
+        try:
+            agent.greet(newcomer, role)
+        except Exception as exc:  # noqa: BLE001 - a bad hello is not a crash
+            hive.event("attend.error", {"agent": agent.name, "error": repr(exc)})
+    hive.event("social.welcome", {"newcomer": newcomer, "role": role,
+                                  "by": [a.name for a in greeters]})
+    if not quiet and greeters:
+        print(color(f"  {newcomer} joined — {len(greeters)} agent(s) went over to say hi",
+                    "green"))
+
+
+def gossip(hive: Hive, agents: list[Any], rng: random.Random,
+           quiet: bool = False) -> None:
+    """One agent says something to another that has nothing to do with the work.
+
+    Weighted by persona: the chatty ones start most of it, which is also true of
+    every lab I have worked in.
+    """
+    if len(agents) < 2:
+        return
+    weights = [max(0.05, float(a.persona.get("chattiness", 0.4))) for a in agents]
+    speaker = rng.choices(agents, weights=weights, k=1)[0]
+    listener = rng.choice([a for a in agents if a.name != speaker.name])
+    try:
+        speaker.small_talk(listener.name)
+    except Exception as exc:  # noqa: BLE001
+        hive.event("attend.error", {"agent": speaker.name, "error": repr(exc)})
+        return
+    hive.event("social.gossip", {"from": speaker.name, "to": listener.name})
+    if not quiet:
+        print(color(f"  {speaker.name} wandered over to {listener.name}", "dim"))
+
+
+def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
+           interval: float = 2.0, stop: threading.Event | None = None,
+           quiet: bool = False, social_every: float = 180.0,
+           seed: int | None = None, runs: str | None = None,
+           dry_run: bool = False) -> None:
+    """Keep the hired roster running: route mail, tick everyone, repeat.
+
+    Posting a message from the dashboard only drops it into a mailbox --
+    something has to turn the crank, or that message sits in an inbox forever
+    and every agent shows `awaiting`. This is that crank. It builds its own Hive
+    because the memory palace holds a SQLite connection that belongs to the
+    thread that opened it.
+    """
+    hive = Hive(hive_root)
+    ctx = AgentContext(hive=hive, registry=load_registry(capabilities),
+                       guardrails=Guardrails(budget=Budget(max_usd=max_usd),
+                                             dry_run=dry_run),
+                       workdir=Path(hive_root).parent / "agents",
+                       runs=Path(runs) if runs else None)
+    agents: list[Any] = []
+    key = None
+    rng = random.Random(seed)
+    # Nobody greets the people who were already in the room when the lights came
+    # on -- only someone who arrives while the lab is running.
+    known = {a["name"] for a in hive.roster()}
+    last_social = time.time()
+    while not (stop and stop.is_set()):
+        current = roster_key(hive)
+        if current != key:
+            agents = roster_agents(hive, ctx)
+            key = current
+            if not quiet:
+                print(color(f"  attending {len(agents)} agent(s): "
+                            f"{', '.join(a.name for a in agents) or 'nobody'}", "dim"))
+        for newcomer in sorted({a.name for a in agents} - known):
+            known.add(newcomer)
+            welcome(hive, agents, newcomer, quiet=quiet)
+        hive.route()
+        handled = 0
+        for agent in agents:
+            try:
+                handled += agent.tick()
+            except GuardrailTripped as exc:
+                # A tripped budget stops the loop, not the process: the operator
+                # should be told once rather than watch it spin.
+                hive.event("attend.halted", {"reason": str(exc)})
+                print(color(f"  budget guardrail tripped: {exc}", "yellow"))
+                return
+            except Exception as exc:  # noqa: BLE001 - one bad agent must not stop the room
+                hive.event("attend.error", {"agent": agent.name, "error": repr(exc)})
+                print(color(f"  {agent.name}: {exc}", "red"))
+        hive.route()
+        if handled and not quiet:
+            print(color(f"  {time.strftime('%H:%M:%S')}  handled {handled} message(s)",
+                        "dim"))
+        # Only when the room is otherwise quiet: gossip never delays the work,
+        # and a busy lab has no time for it anyway.
+        if social_every and not handled and time.time() - last_social >= social_every:
+            gossip(hive, agents, rng, quiet=quiet)
+            last_social = time.time()
+        time.sleep(interval)
+
+
+def cmd_attend(args: argparse.Namespace) -> int:
+    hive = Hive(args.hive)
+    if not hive.roster():
+        print(color("nobody hired. Try: bioharness staff hire ada --role planner", "red"))
+        return 1
+    print(color("Bioinfo Harness attendant", "bold"))
+    print(f"  hive {hive.root}")
+    print("  routing mail and ticking the roster; ctrl-c to stop")
+    try:
+        attend(args.hive, args.capabilities, max_usd=args.max_usd,
+               interval=args.interval, runs=args.runs, dry_run=args.dry_run,
+               social_every=0 if args.no_social else args.social_every)
+    except KeyboardInterrupt:
+        print("\n  stopped")
+    return 0
+
+
 def cmd_ui(args: argparse.Namespace) -> int:
     from .server import Dashboard, serve
     dash = Dashboard(runs=Path(args.runs), hive_root=Path(args.hive),
@@ -220,6 +356,21 @@ def cmd_ui(args: argparse.Namespace) -> int:
     print(color("Bioinfo Harness dashboard", "bold"))
     print(f"  runs {dash.runs}")
     print(f"  hive {dash.hive_root}")
+    if args.attend:
+        # The server itself stays read-only: this is a separate loop that
+        # happens to share the process, exactly as `bioharness attend` would in
+        # another terminal.
+        threading.Thread(target=attend, daemon=True,
+                         args=(args.hive, args.capabilities),
+                         kwargs={"max_usd": args.max_usd, "quiet": True,
+                                 "runs": args.runs, "dry_run": args.dry_run,
+                                 "social_every": (0 if args.no_social
+                                                  else args.social_every)}).start()
+        print(color("  attending: messages sent from the dashboard will be "
+                    "picked up and answered", "green"))
+    else:
+        print(color("  read-only: add --attend (or run `bioharness attend`) for "
+                    "agents to act on what you send them", "dim"))
     serve(dash, host=args.host, port=args.port, open_browser=not args.no_open)
     return 0
 
@@ -252,18 +403,28 @@ def cmd_staff(args: argparse.Namespace) -> int:
         if not roster:
             print("nobody hired yet. Try: bioharness staff hire ada --role planner")
             return 0
+        from .agents.persona import brief
         print(color(f"{'NAME':<14}{'ROLE':<12}{'PROVIDER':<14}"
                     f"{'MODEL':<26}AUTONOMY", "bold"))
         for a in roster:
             print(f"{a['name']:<14}{a.get('role',''):<12}{a.get('provider',''):<14}"
                   f"{(a.get('model') or '-') + '  ':<26}{a.get('autonomy','-')}")
+            who = brief(a.get("persona") or {})
+            if who:
+                print(color(f"{'':<14}{who}", "dim"))
+            if a.get("autonomy") == "bounded" and a.get("role") in ROLES:
+                scope = a.get("scope") or []
+                print(color(f"{'':<14}may run: "
+                            + (", ".join(scope) if scope else "nothing (no scope declared)"),
+                            "dim"))
         return 0
 
     if args.staff_cmd == "assign":
         roster = dash.hive().roster()
         names = args.names or [a["name"] for a in roster
                                if a.get("role") != "operator"]
-        result = dash.assign(names, args.provider, args.model or "", args.autonomy or "")
+        result = dash.assign(names, args.provider, args.model or "",
+                             args.autonomy or "", scope=args.scope)
         if not result.get("ok"):
             print(color(f"error: {result['error']}", "red"))
             return 1
@@ -276,12 +437,16 @@ def cmd_staff(args: argparse.Namespace) -> int:
 
     if args.staff_cmd == "hire":
         result = dash.hire(args.name, args.role, args.provider, args.model or "",
-                           args.autonomy)
+                           args.autonomy, scope=args.scope)
         if not result.get("ok"):
             print(color(f"error: {result['error']}", "red"))
             return 1
         print(color(f"hired {args.name} as {args.role} "
                     f"({args.provider}{'/' + args.model if args.model else ''})", "green"))
+        from .agents.persona import brief
+        who = brief((result.get("agent") or {}).get("persona") or {})
+        if who:
+            print(color(f"  {who}", "dim"))
         return 0
 
     result = dash.fire(args.name)
@@ -361,6 +526,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 # -- parser ----------------------------------------------------------------
+def add_social_args(c: argparse.ArgumentParser) -> None:
+    """Off-topic talk costs tokens like anything else, so it is on a timer the
+    operator can slow down or switch off."""
+    c.add_argument("--social-every", type=float, default=180.0, metavar="SECONDS",
+                   help="how often the room may start a conversation about "
+                        "nothing, when it is otherwise idle (default 180)")
+    c.add_argument("--no-social", action="store_true",
+                   help="work only: no gossip, greetings still happen")
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="bioharness",
@@ -414,7 +589,26 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--dry-run", action="store_true")
     c.set_defaults(func=cmd_mission)
 
+    c = sub.add_parser("attend", help="keep the hired roster running: route mail "
+                                     "and tick every agent until stopped")
+    c.add_argument("--interval", type=float, default=2.0,
+                   help="seconds between rounds (default 2)")
+    c.add_argument("--max-usd", type=float, default=5.0)
+    c.add_argument("--dry-run", action="store_true",
+                   help="agents may plan and dispatch runs, but every step is "
+                        "resolved and skipped rather than executed")
+    add_social_args(c)
+    c.set_defaults(func=cmd_attend)
+
     c = sub.add_parser("ui", help="serve the local dashboard")
+    c.add_argument("--attend", action="store_true",
+                   help="also run the roster, so messages sent from the browser "
+                        "are actually acted on")
+    c.add_argument("--max-usd", type=float, default=5.0,
+                   help="budget ceiling for --attend")
+    c.add_argument("--dry-run", action="store_true",
+                   help="with --attend: resolve every step and execute nothing")
+    add_social_args(c)
     c.add_argument("--port", type=int, default=8765)
     c.add_argument("--host", default="127.0.0.1",
                    help="loopback by default; the dashboard is read-only either way")
@@ -434,6 +628,9 @@ def build_parser() -> argparse.ArgumentParser:
     sh.add_argument("--model", default="", help=f"for claude-api: {', '.join(MODELS)}")
     sh.add_argument("--autonomy", default="bounded",
                     choices=["read_only", "suggest", "bounded", "full"])
+    sh.add_argument("--scope", nargs="*", default=None, metavar="CAP",
+                    help="what a bounded agent may execute: capability ids, or "
+                         "domain:<name>. Ignored for full and read_only.")
     sh.set_defaults(func=cmd_staff)
     sa = ssub.add_parser("assign",
                          help="point existing agents at a different provider, "
@@ -443,6 +640,8 @@ def build_parser() -> argparse.ArgumentParser:
     sa.add_argument("--model", default="")
     sa.add_argument("--autonomy", default="",
                     choices=["", "read_only", "suggest", "bounded", "full"])
+    sa.add_argument("--scope", nargs="*", default=None, metavar="CAP",
+                    help="replace what a bounded agent may execute")
     sa.set_defaults(func=cmd_staff)
 
     sf = ssub.add_parser("fire", help="dismiss an agent (its memory is archived)")

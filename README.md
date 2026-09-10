@@ -72,8 +72,22 @@ bioharness run md-stability --dry-run --set pdb_id=1AKI
 
 ```bash
 bioharness ui                 # opens http://127.0.0.1:8765
+bioharness ui --attend        # …and act on what you send from the browser
 bioharness ui --no-open --port 9000
 ```
+
+**A message you send from the dashboard does nothing on its own.** Posting only
+drops mail into an agent's mailbox; something has to route it and tick the
+roster, or it sits there and every agent reads `awaiting`. Either run the
+attendant beside the dashboard with `--attend`, or in its own terminal:
+
+```bash
+bioharness attend             # route mail and tick the roster until stopped
+bioharness attend --interval 5 --max-usd 2
+```
+
+The server itself stays read-only either way: `--attend` is the same loop
+running in a thread of the same process, never driven by an HTTP request.
 
 ### floor
 
@@ -119,6 +133,15 @@ The command center on the right carries the live event stream, the worker
 roster, memory-palace search, the current run's steps, and its DAG. The box at
 the bottom queues a message straight into an agent's mailbox.
 
+### chat
+
+The roster's messages read back as a conversation: who spoke, who they spoke to,
+what they actually said, and when. Peer questions and answers appear inline with
+the functional traffic, so a mission reads as an exchange rather than as a log of
+topics. The same utterances surface on the **floor** as speech bubbles over the
+agent who said them, fading after a few seconds — the floor for what is happening
+now, the chat tab for reading the whole thing back.
+
 ### runs / hive / caps / cost
 
 - **runs** — the pipeline as a DAG coloured by live status, the step table,
@@ -141,7 +164,9 @@ than deleting it.
 It is loopback-bound and reads files for everything. There is exactly **one**
 write path: `POST /api/message`, which drops a message into an agent's mailbox.
 The recipient must already be enrolled and the topic must be one the roster
-actually handles, so the box cannot be used to inject arbitrary work. Reads
+actually handles, so the box cannot be used to inject arbitrary work. `peer.ask`
+is one of those topics, so the composer can put a question to an agent and read
+the answer in the chat tab. Reads
 never mutate: the hive is *peeked* rather than consumed, so watching a mission
 never eats its mail.
 
@@ -160,6 +185,169 @@ bioharness mission "call variants in this WGS sample" --from-type fastq --to-typ
 With no `--roles`, a mission staffs itself from whoever is hired, and each agent
 uses **its own** provider — so an API-backed analyst and a deterministic curator
 work the same mission. `--roles` overrides the roster for one run.
+
+### Agents talking to each other
+
+Every agent can put a question to any other, by name or by role:
+
+```python
+self.ask_peer("curator", "Which of these inputs would you refuse?", steps=chain)
+```
+
+The base class answers on behalf of whatever role received it, so a scribe that
+only subscribes to `report` still has an opinion when asked. Three rules keep an
+open channel from becoming an unbounded one:
+
+- **A reply is never answered back.** An exchange is two messages deep by
+  construction, which is what stops two agents talking until the budget is gone.
+- **Roles are resolved to names.** A mission staffed from the hive has a planner
+  called `ada`, not one called `planner`; `hive.whois()` maps one to the other,
+  and asking for a role nobody fills is recorded as `agent.no_peer` rather than
+  raised.
+- **Hops are capped** (`MAX_HOPS`), and the mission's round limit and budget
+  guardrails apply to peer talk exactly as they do to tool execution.
+
+Who starts a conversation, and why:
+
+| Who | Asks | About |
+|---|---|---|
+| PI | whoever the job needs | one order per role, in the PI's own words |
+| planner | curator | which inputs the curator would refuse, before compute is spent |
+| validator | analyst | which artefact explains a gate that just failed |
+
+### They are labmates, not job functions
+
+Every agent has a persona: a temperament, a way of talking, something it cares
+about that has nothing to do with the science, and something that reliably
+annoys it. It is derived from the agent's name with a stable hash — `ada` is the
+same person tomorrow and on the cluster node — and written into `identity.json`
+the first time it is used, so a personality does not drift when the trait tables
+in the source change.
+
+```bash
+bioharness staff hire mira --role analyst --provider antigravity
+# hired mira as analyst (antigravity/gemini-3.8-flash-low)
+#   world-weary but kind; into a half-finished PhD in something unrelated;
+#   cannot stand unlabelled tubes
+```
+
+The persona goes into the system prompt alongside the role, so it colours the
+work too — but it is explicitly not allowed to soften a scientific judgement.
+An agent can be funny and still refuse a bad input.
+
+**A new hire gets welcomed.** When someone joins while the lab is running, every
+other agent goes over and says hello in its own voice, and the newcomer answers
+each of them. Nobody greets the people who were already in the room when the
+lights came on.
+
+**A quiet room gossips.** When there is no work in flight, the attendant lets one
+agent start a conversation about nothing — weighted by how chatty its persona is.
+It runs two turns and peters out, the way a real one does when someone's run
+finishes. Off-topic talk costs tokens like anything else, so it is on a timer:
+
+```bash
+bioharness attend --social-every 45     # more talkative
+bioharness attend --no-social           # work only; greetings still happen
+```
+
+Social topics (`greet`, `greet.reply`, `smalltalk`) bypass a role's
+`subscribes`, because being a colleague is not one role's job, and they never
+produce a `.result` — a chat is not a work item. They appear in the **chat** tab
+in a lighter style, so gossip is legible as gossip.
+
+### One lab, one map
+
+Agents used to address each other by role and furnish the building themselves —
+a third-floor printer, a cold room, a machine nobody else had heard of. Now
+`agents/lab.py` is the single answer to *what is here and where is it*: seven
+rooms, the instruments in each, and which role works where. Every agent's prompt
+carries the map, the line **"there is no other room, floor or instrument — do
+not invent one"**, and a roster of colleagues by name with the room each sits in.
+
+```
+Planning Office   pi, planner    whiteboard, two dual-monitor desks, wall clock…
+Sequencing Bay    curator        benchtop sequencer, -80, thermocycler, TapeStation…
+QC Bench          validator      microscope, plate reader, the good centrifuge…
+Compute Cluster   runner         four racks, head-node terminal, tape library, UPS…
+Structure Lab     analyst        GPU workstation, molecular viewer, the window seat…
+Write-up Desk     scribe         the printer that jams on figures, reference shelf…
+Waiting Lobby     operator       sofas, the coffee machine that eats coins…
+```
+
+The room ids match `ROOMS` in `ui/app.js`, and a test fails if they drift — the
+lab an agent talks about has to be the lab you can watch. Personas draw their
+haunt from their own room, so *"you'll find me by the sequencer"* is true, and
+every pet peeve points at something the building actually has.
+
+On the floor, a message makes the sender walk **to the person, not to their
+desk**. Targeting the desk had two agents swap rooms whenever they replied to
+each other — the PI marching to the lobby while the human marched to the
+planning office, passing in the corridor. Whoever is spoken to now waits to be
+reached, and two people already standing together just talk.
+
+### The invented lab is not evidence
+
+Give agents a shared world and they will furnish it: within an hour of the first
+gossip, this roster had a -80 freezer with a broken alarm, a coin-eating coffee
+machine, and a plan to silence the alarm with a wrench. That is harmless — no
+capability in the registry touches hardware, and none of it exists — but it does
+not stay harmless on its own, because an agent's memory is fed back to it as
+context. One analyst opened a genuine QC answer with *"Someone left the latch
+loose on the -80 again"*: the joke was stored as memory, recalled on the next
+question, and repeated. A fiction that reinforces itself one turn at a time ends
+up as a fabricated artefact in a Methods section.
+
+Three rules keep the two apart:
+
+- **Separate memories.** Social talk is written to `social.md` and indexed as
+  kind `social`; work recall reads only `memory` and `note`. It is still the
+  agent's memory — it just cannot come back as evidence.
+- **A guard on every work prompt.** Answer the question, no scene-setting, and
+  state only what the files, metrics and ledger show. Small talk is exempt: it
+  is *supposed* to be about the imaginary freezer.
+- **Own memory only.** `think()` primes an agent with its own notes. The palace
+  still holds the whole lab's memory and `bioharness recall` searches all of it,
+  but priming one agent with another's recollections had them answering in each
+  other's voices about work they never did.
+
+The personas are told the same thing directly: the lab around them is banter,
+they have no hands and no instruments, and they never claim to have touched
+anything.
+
+### What the PI does with a goal
+
+The PI reasons about the goal and writes each staffed role its own order —
+`{role, instruction}` under an enforced JSON schema — rather than running a fixed
+handoff. Orders are then checked against reality before anything is sent:
+
+- A role nobody fills is dropped and recorded as `agent.no_peer`; an invented
+  role never reaches a mailbox.
+- Each role is tasked at most once, and only with the topic that actually gives
+  it work (`planner → plan.request`, `curator → data.validate`, and so on).
+- A role whose inputs do not exist yet is **asked** instead of tasked. A
+  validator handed `qc.check` with no metrics returns a meaningless pass, so it
+  gets a question until there are numbers to gate.
+- With no provider, or on a model that answers with prose instead of JSON, the
+  PI falls back to the standard split: plan it, and ask everyone else what they
+  need. That is not a degraded mode — it is what a PI does with any goal.
+
+When the plan comes back, the PI hands the planned steps to the scribe so a
+Methods draft exists before a byte is processed; if no route was found, it asks
+the curator and analyst what capability is missing rather than going quiet.
+
+An agent with no LLM provider still answers — it says so plainly instead of
+going quiet, because silence reads as having no opinion.
+
+**They answer, they do not decline.** An early version of the peer prompt ended
+with *"say plainly if this falls outside your remit"* — and 32 of 46 answers
+opened by doing exactly that, because a narrow role description plus an offered
+escape hatch produces a refusal every time. The instruction now says the
+opposite: lead with the most useful thing you can say from where you sit, answer
+your part of a question that spans roles and name who should take the rest, and
+refuse only when answering would mean inventing data you do not have — saying
+which data is missing. The personas carry the same line: colleagues ask you
+things next to your job, and helping anyway is what everyone in a working lab
+does.
 
 ### Providers
 
@@ -306,6 +494,56 @@ steps:
 - `scatter:` — fan one step out per item (see `workflows/dock-screen.yaml`)
 - `when:` — guard a step on a parameter, compared as data, never `eval`'d
 - `retries:` — bounded, and still subject to the circuit breaker
+
+## Authority
+
+An agent's `autonomy` used to be a stored label: nothing consulted it, so
+`read_only` restrained nothing and `full` granted nothing — and no agent could
+execute at all, because the orchestrator was only ever built by `bioharness run`.
+Both are now real.
+
+| Level | May execute |
+|---|---|
+| `read_only` | nothing — plans and inspects |
+| `suggest` | nothing without a human; the step is refused with that reason |
+| `bounded` | only what is in its declared `--scope` (capability ids, or `domain:<name>`) |
+| `full` | anything in the registry |
+
+```bash
+bioharness staff hire rex --role runner --autonomy full
+bioharness staff hire rex --role runner --scope fastqc fastp domain:ngs
+bioharness staff assign --provider antigravity --autonomy full    # the whole roster
+```
+
+The check lives in the orchestrator, because that is the single committer: gate
+the one place that starts work and no agent can slip a step past it. A refusal is
+not an exception — the step is recorded `blocked` with the reason, in the run's
+own ledger, so `runs` shows exactly what was refused and why:
+
+```
+metrics -> blocked | rex is read_only: may plan and inspect, never execute
+```
+
+A `bounded` agent with no scope may run nothing, and says so rather than failing
+obscurely. The **intervention ladder** now bites too: an agent escalated twice is
+dropped to `suggest` even if it was hired at `full`, and the refusal says so.
+
+### The runner
+
+The seventh role, and the one that spends real compute. It runs exactly the
+workflow it was handed, never edits it to make it work, and refuses a plan with
+unbound parameters instead of burning a queue slot on a run that cannot succeed.
+
+Nothing is executed on the planner's word alone. The chain is
+**plan → curate → run**: the PI sends the finished plan to the curator, and only a
+pass reaches the runner. A block is recorded on the blackboard under
+`mission/held` with the problems that caused it.
+
+To let the lab work unattended while you watch what it *would* do:
+
+```bash
+bioharness attend --dry-run       # every step resolved, nothing executed
+```
 
 ## Guardrails
 

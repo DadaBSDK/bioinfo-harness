@@ -361,3 +361,52 @@ def test_attach_creates_the_agent_when_it_is_new(live):
     hive = dash.hive()
     hive.attach("fresh", "scribe", provider="builtin")
     assert any(a["name"] == "fresh" for a in hive.roster())
+
+
+# -- the conversation view -------------------------------------------------
+def test_conversation_reads_back_what_was_said(live):
+    _, base, _ = live
+    convo = get(base, "/api/conversation")
+    assert convo, "the fixture sent one message; it should be in the transcript"
+    first = convo[0]
+    assert (first["sender"], first["recipient"]) == ("pi", "planner")
+    assert first["sender_role"] == "pi"
+    # A plan request says what it is asking for, not `{"goal": "..."}`.
+    assert first["say"] == "call variants"
+
+
+def test_conversation_deduplicates_a_delivered_message(live):
+    dash, base, _ = live
+    dash.hive().send("planner", "pi", "peer.reply", {"answer": "fastq → vcf via bwa_mem"})
+    convo = get(base, "/api/conversation")
+    ids = [c["id"] for c in convo]
+    assert len(ids) == len(set(ids))
+    assert convo[-1]["say"] == "fastq → vcf via bwa_mem"
+
+
+def test_floor_carries_the_last_utterances_for_the_bubbles(live):
+    dash, base, _ = live
+    dash.hive().send("pi", "planner", "peer.ask", {"question": "how long will this take?"})
+    chatter = get(base, "/api/floor")["chatter"]
+    assert chatter[-1]["say"] == "how long will this take?"
+    # The bubble needs a line, not a whole message body.
+    assert "body" not in chatter[-1]
+
+
+def test_a_human_may_ask_an_agent_a_question(live):
+    dash, base, _ = live
+    status, r = post(base, "/api/message",
+                     {"to": "planner", "topic": "peer.ask",
+                      "body": {"question": "why bwa and not minimap2?"}})
+    assert (status, r["ok"]) == (200, True)
+    assert [m.topic for m in dash.hive().mailbox("planner").peek()] \
+        == ["plan.request", "peer.ask"]
+
+
+def test_a_tasking_message_says_what_the_agent_was_told(live):
+    dash, base, _ = live
+    dash.hive().send("pi", "planner", "report",
+                     {"tasks": [{"capability": "bwa_mem"}],
+                      "instruction": "Draft Methods for the planned pipeline."})
+    assert get(base, "/api/conversation")[-1]["say"] == \
+        "Draft Methods for the planned pipeline."

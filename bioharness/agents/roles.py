@@ -11,14 +11,16 @@ none of them hardcodes a tool -- they reason over the capability registry.
 from __future__ import annotations
 
 import json
+import re
 from collections import deque
 from pathlib import Path
 from typing import Any
 
 from ..core.guardrails import Autonomy
 from ..core.registry import Registry
-from ..core.orchestrator import topo_sort
+from ..core.orchestrator import Orchestrator, topo_sort
 from ..core.schemas import Message, Step, Workflow
+from ..core.workspace import Workspace
 from .base import Agent, ProviderUnavailable
 
 
@@ -59,7 +61,9 @@ class Planner(Agent):
     invent a capability that is not in the catalogue."""
 
     role = "planner"
-    subscribes = ("plan.request",)
+    # `goal` too: a human messaging the planner directly means "plan this", and
+    # silently dropping it looks identical to an agent that never ran.
+    subscribes = ("plan.request", "goal")
     default_autonomy = Autonomy.SUGGEST
 
     def handle(self, msg: Message) -> dict[str, Any]:
@@ -86,6 +90,15 @@ class Planner(Agent):
         self.remember(f"Planned `{wf['name']}` for goal: {goal}\nSteps: "
                       + " -> ".join(s["capability"] for s in wf["steps"]),
                       heading=f"plan {wf['name']}")
+
+        # The curator is the one who will refuse this plan's inputs at run time.
+        # Better to hear the objection now than after the queue wait.
+        chain = " -> ".join(s["capability"] for s in wf["steps"])
+        self.ask_peer("curator",
+                      f"I plan to run: {chain}. Which of these inputs would you "
+                      f"refuse to let through, and what should each be bound to?",
+                      workflow=wf["name"], steps=chain,
+                      unbound_params=sorted(wf.get("params", {})))
         return {"ok": True, "workflow": wf}
 
     def _linear_workflow(self, name: str, chain: list[str]) -> dict[str, Any]:
@@ -304,6 +317,13 @@ class Validator(Agent):
         verdict = "pass" if not failures else "fail"
         self.publish("qc/last", {"verdict": verdict, "failures": failures,
                                  "passes": passes, "step": msg.body.get("step")})
+        if failures:
+            # Enforcing the gate is this role's job; explaining the number is
+            # not, so the failure goes to the analyst as a question.
+            self.ask_peer("analyst",
+                          "These QC gates failed. Which technical artefact most "
+                          "likely explains them, and is it worth a rerun?",
+                          failures=failures, step=msg.body.get("step"))
         return {"verdict": verdict, "failures": failures, "checked": len(passes) + len(failures)}
 
 
@@ -376,27 +396,284 @@ class Scribe(Agent):
         return "\n".join(lines) + "\n"
 
 
+class Runner(Agent):
+    """You execute pipelines. You run exactly the workflow you were handed, you
+    never edit it to make it work, and you stop at the first failure rather than
+    pressing on with broken inputs. What you did is recorded in the ledger."""
+
+    role = "runner"
+    subscribes = ("run.request",)
+    # Executing is the one thing in this harness that spends real compute, so a
+    # runner starts bounded: it must be given a scope, or raised to full, on
+    # purpose rather than by default.
+    default_autonomy = Autonomy.BOUNDED
+
+    def handle(self, msg: Message) -> dict[str, Any]:
+        raw = msg.body.get("workflow") or {}
+        if not raw or not raw.get("steps"):
+            return {"ok": False, "reason": "no workflow to run"}
+
+        wf = workflow_from_dict(raw)
+        params = {**(raw.get("params") or {}), **(msg.body.get("params") or {})}
+        # Declared-but-empty, plus anything the steps reference that nobody
+        # declared: a plan that binds `{{ params.reads }}` with no `reads` in
+        # sight fails at the first step with a template error, which reads like
+        # a tool problem rather than a missing input.
+        unbound = sorted({k for k, v in params.items() if v is None}
+                         | (_referenced_params(raw) - {k for k, v in params.items()
+                                                       if v is not None}))
+        if unbound:
+            # Running a pipeline with holes in it wastes a queue slot and
+            # produces a failure that looks like a tool problem.
+            self.publish(f"run/blocked/{wf.name}",
+                         {"reason": "unbound parameters", "needs": unbound})
+            return {"ok": False, "reason": "unbound parameters", "needs": unbound,
+                    "workflow": wf.name}
+
+        runs = self.ctx.runs or (self.workdir / "runs")
+        orch = Orchestrator(self.ctx.registry, Workspace(runs),
+                            self.ctx.guardrails, self.hive)
+        summary = orch.run(wf, params, actor=self.actor())
+
+        blocked = [t for t in summary.get("tasks", []) if t.get("status") == "blocked"]
+        self.publish(f"run/{summary['run_id']}",
+                     {"workflow": wf.name, "status": summary["status"],
+                      "dir": summary["dir"], "blocked": [t["error"] for t in blocked]})
+        self.remember(f"Ran `{wf.name}` ({summary['status']}) as {summary['run_id']}: "
+                      + " -> ".join(t["step"] for t in summary.get("tasks", [])),
+                      heading=f"run {summary['run_id']}")
+        return {"ok": summary["status"] == "ok", "run_id": summary["run_id"],
+                "status": summary["status"], "dir": summary["dir"],
+                "seconds": summary.get("seconds"),
+                "refused": [t["error"] for t in blocked]}
+
+
 class PI(Agent):
     """You are the principal investigator. You turn a research goal into a mission:
     plan, curate, run, validate, analyse, write up. You delegate rather than execute,
     and you stop the mission when a QC gate fails rather than pushing through."""
 
     role = "pi"
-    subscribes = ("goal", "mission")
+    subscribes = ("goal", "mission", "plan.request.result", "data.validate.result")
     default_autonomy = Autonomy.BOUNDED
 
+    # The topic that actually gives each role work. A PI may only hand out jobs
+    # from this table: an invented topic reaches an agent that does not
+    # subscribe to it, which looks exactly like a mission that ran and did
+    # nothing.
+    DISPATCH_TOPICS = {
+        "planner": "plan.request", "curator": "data.validate",
+        "validator": "qc.check", "analyst": "analyze", "scribe": "report",
+        "runner": "run.request",
+    }
+    # What each role's handler needs before that work topic means anything.
+    DISPATCH_NEEDS = {"curator": "inputs", "validator": "metrics",
+                      "analyst": "artifacts", "scribe": "tasks",
+                      "runner": "workflow"}
+
+    DISPATCH_SCHEMA: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "reasoning": {"type": "string"},
+            "orders": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "role": {"type": "string"},
+                        "instruction": {"type": "string"},
+                    },
+                    "required": ["role", "instruction"],
+                },
+            },
+        },
+        "required": ["orders"],
+    }
+
     def handle(self, msg: Message) -> dict[str, Any]:
-        goal = msg.body.get("goal", "")
+        if msg.topic == "plan.request.result":
+            return self._on_plan(msg)
+        if msg.topic == "data.validate.result":
+            return self._on_curation(msg)
+
+        goal = msg.body.get("goal") or msg.body.get("question") or msg.body.get("note", "")
         self.remember(f"Mission requested: {goal}", heading="mission")
-        self.send("planner", "plan.request", **msg.body)
-        self.publish("mission/current", {"goal": goal, "requested_by": msg.sender})
-        return {"ok": True, "delegated_to": "planner", "goal": goal}
+
+        staffed = {a["role"]: a["name"] for a in self.hive.roster()
+                   if a["name"] != self.name and a.get("role") in self.DISPATCH_TOPICS}
+        orders, reasoning = self._decide(goal, sorted(staffed), msg.body)
+
+        dispatched: list[dict[str, str]] = []
+        seen: set[str] = set()
+        for order in orders:
+            role = str(order.get("role", "")).strip().lower()
+            instruction = str(order.get("instruction", "")).strip()
+            if role in seen or role not in staffed or not instruction:
+                if role and role not in staffed:
+                    self.hive.event("agent.no_peer",
+                                    {"agent": self.name, "wanted": role})
+                continue
+            seen.add(role)
+            who = staffed[role]
+            topic = self._task_for(role, msg.body)
+            if topic == self.PEER_ASK:
+                # Nothing for this role to work on yet, so it is asked rather
+                # than handed a job it would have to invent the inputs for.
+                self.ask_peer(who, instruction, goal=goal,
+                              domain=msg.body.get("domain"))
+            else:
+                self.send(who, topic, **{**msg.body, "goal": goal,
+                                         "instruction": instruction})
+            dispatched.append({"to": who, "role": role, "topic": topic})
+
+        self.publish("mission/current", {"goal": goal, "requested_by": msg.sender,
+                                         "reasoning": reasoning,
+                                         "dispatched": dispatched})
+        if reasoning:
+            self.remember(reasoning[:1500], heading="how I split this up")
+        return {"ok": bool(dispatched), "goal": goal, "reasoning": reasoning,
+                "dispatched": dispatched,
+                "reason": "" if dispatched else "nobody on the roster to task"}
+
+    def _task_for(self, role: str, body: dict[str, Any]) -> str:
+        """The topic that gives `role` real work, given what the mission holds.
+
+        A validator handed `qc.check` with no metrics returns a meaningless
+        pass, so a role whose inputs do not exist yet is asked a question
+        instead of being given a job.
+        """
+        needed = self.DISPATCH_NEEDS.get(role)
+        if needed and not body.get(needed):
+            return self.PEER_ASK
+        return self.DISPATCH_TOPICS[role]
+
+    def _decide(self, goal: str, roles: list[str],
+                body: dict[str, Any]) -> tuple[list[dict[str, str]], str]:
+        """Work out who does what. Falls back to the standard split.
+
+        The deterministic split is not a degraded mode: it is what a PI does
+        with any goal -- plan it, and ask everyone else what they need.
+        """
+        default = [{"role": r,
+                    "instruction": (f"Plan the pipeline for: {goal}" if r == "planner"
+                                    else f"Mission goal: {goal}. How would you "
+                                         f"approach your part of it, what do you "
+                                         f"need from the others, and is there "
+                                         f"anything here that would make you stop "
+                                         f"the run?")}
+                   for r in (["planner"] if "planner" in roles else [])
+                   + [r for r in roles if r != "planner"]]
+        if self.provider is None or not roles:
+            return default, ""
+        try:
+            decision = self.think_json(
+                f"The lab has been asked: {goal}\n\n"
+                f"These roles are staffed: {', '.join(roles)}. Give each one an "
+                f"order in your own words -- what you want from them for this "
+                f"goal specifically. Task the planner first if it is staffed. "
+                f"Use each role at most once, and only roles from that list.",
+                context=json.dumps({k: v for k, v in body.items() if v}, default=str)[:4000],
+                fallback={"orders": default},
+                schema=self.DISPATCH_SCHEMA)
+        except (ProviderUnavailable, ValueError) as exc:
+            self.hive.event("agent.fell_back",
+                            {"agent": self.name, "reason": str(exc)[:200]})
+            return default, ""
+        orders = decision.get("orders") if isinstance(decision, dict) else None
+        if not isinstance(orders, list) or not orders:
+            return default, ""
+        return orders, str(decision.get("reasoning", ""))
+
+    def _on_plan(self, msg: Message) -> dict[str, Any]:
+        """The planner has answered. Carry the plan to whoever can use it now."""
+        wf = msg.body.get("workflow") or {}
+        if not msg.body.get("ok") or not wf:
+            reason = msg.body.get("reason", "no workflow")
+            self.remember(f"No route found: {reason}", heading="plan failed")
+            for role in ("curator", "analyst"):
+                who = self.hive.whois(role)
+                if who:
+                    self.ask_peer(who, f"The planner could not route this goal "
+                                       f"({reason}). What capability are we missing?",
+                                  candidates=msg.body.get("candidates", []))
+            return {"ok": False, "reason": reason}
+
+        steps = wf.get("steps", []) or []
+        self.publish("mission/plan", {"workflow": wf.get("name"),
+                                      "steps": [s.get("capability") for s in steps]})
+        self.remember("Plan accepted: "
+                      + " -> ".join(s.get("capability", "?") for s in steps),
+                      heading=f"plan {wf.get('name', '')}")
+        # The scribe can draft Methods from the planned steps before a single
+        # byte is processed -- the ledger will correct the details later.
+        scribe = self.hive.whois("scribe")
+        if scribe:
+            self.send(scribe, "report", tasks=steps, run_id=wf.get("name", ""),
+                      instruction="Draft Methods for the planned pipeline.")
+
+        # Nothing is executed on the planner's word alone: the curator sees the
+        # inputs first, and the run is dispatched from its verdict.
+        self.publish("mission/workflow", wf)
+        curator = self.hive.whois("curator")
+        if curator:
+            self.send(curator, "data.validate", inputs=wf.get("params") or {},
+                      types={}, workflow=wf.get("name"),
+                      instruction="Check the inputs for the plan before it runs.")
+            next_step = f"{curator} is checking the inputs"
+        else:
+            next_step = self._dispatch_run(wf, "no curator on the roster")
+        return {"ok": True, "workflow": wf.get("name"),
+                "steps": [s.get("capability") for s in steps],
+                "handed_to": scribe or "(no scribe)", "next": next_step}
+
+    def _on_curation(self, msg: Message) -> dict[str, Any]:
+        """The curator has ruled on the inputs. Only a pass reaches the runner."""
+        wf = self.hive.blackboard.get("mission/workflow") or {}
+        problems = msg.body.get("problems") or []
+        if not msg.body.get("ok"):
+            self.remember("Run held: " + "; ".join(str(p) for p in problems[:5]),
+                          heading="curation block")
+            self.publish("mission/held", {"workflow": wf.get("name"),
+                                          "problems": problems})
+            return {"ok": False, "reason": "curator blocked the inputs",
+                    "problems": problems}
+        return {"ok": True, "next": self._dispatch_run(wf, "inputs cleared")}
+
+    def _dispatch_run(self, wf: dict[str, Any], why: str) -> str:
+        runner = self.hive.whois("runner")
+        if not runner or not wf:
+            self.hive.event("agent.no_peer", {"agent": self.name, "wanted": "runner"})
+            return "nobody is hired to run it"
+        self.send(runner, "run.request", workflow=wf, why=why,
+                  instruction="Execute this workflow as planned.")
+        return f"handed to {runner} to execute ({why})"
 
 
 ROLES: dict[str, type[Agent]] = {
-    "pi": PI, "planner": Planner, "curator": Curator,
+    "pi": PI, "planner": Planner, "curator": Curator, "runner": Runner,
     "validator": Validator, "analyst": Analyst, "scribe": Scribe,
 }
+
+
+PARAM_REF = re.compile(r"\{\{\s*params\.([A-Za-z_][A-Za-z0-9_]*)")
+
+
+def _referenced_params(raw: dict[str, Any]) -> set[str]:
+    """Every `params.<name>` a workflow's bindings mention."""
+    found: set[str] = set()
+
+    def walk(value: Any) -> None:
+        if isinstance(value, str):
+            found.update(PARAM_REF.findall(value))
+        elif isinstance(value, dict):
+            for v in value.values():
+                walk(v)
+        elif isinstance(value, list):
+            for v in value:
+                walk(v)
+
+    walk(raw.get("steps", []))
+    return found
 
 
 def workflow_from_dict(raw: dict[str, Any]) -> Workflow:

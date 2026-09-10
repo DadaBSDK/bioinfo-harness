@@ -47,6 +47,16 @@ def atomic_write(path: Path, text: str) -> Path:
     return path
 
 
+def messages(d: Path) -> list[Path]:
+    """The message files in `d`, oldest first.
+
+    `atomic_write` leaves a `.tmp-*.json` beside its target while it writes, and
+    `Path.glob` -- unlike a shell -- happily returns dotfiles. Picking one of
+    those up means racing the writer for a half-finished message.
+    """
+    return sorted(f for f in d.glob("*.json") if not f.name.startswith(".tmp-"))
+
+
 class Mailbox:
     """One agent's inbox/outbox pair."""
 
@@ -69,7 +79,7 @@ class Mailbox:
 
     def read(self, consume: bool = True, topic: str | None = None) -> list[Message]:
         msgs: list[Message] = []
-        for f in sorted(self.inbox.glob("*.json")):
+        for f in messages(self.inbox):
             try:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
@@ -85,7 +95,7 @@ class Mailbox:
         return self.read(consume=False, topic=topic)
 
     def pending(self) -> int:
-        return len(list(self.inbox.glob("*.json")))
+        return len(messages(self.inbox))
 
 
 class Blackboard:
@@ -189,7 +199,15 @@ class MemoryPalace:
         self.conn.commit()
         return nid
 
-    def search(self, query: str, limit: int = 10, agent: str | None = None) -> list[dict[str, Any]]:
+    def search(self, query: str, limit: int = 10, agent: str | None = None,
+               kinds: Iterable[str] | None = None) -> list[dict[str, Any]]:
+        """Search remembered notes, optionally restricted to certain kinds.
+
+        `kinds` is how work recall keeps out of the gossip: banter about an
+        imaginary freezer is a real memory for an agent, but it is not evidence
+        and must never turn up as context for a scientific judgement.
+        """
+        kinds = list(kinds) if kinds else []
         if self.fts:
             try:
                 sql = ("SELECT n.* FROM notes_fts f JOIN notes n ON n.rowid = f.rowid "
@@ -198,6 +216,9 @@ class MemoryPalace:
                 if agent:
                     sql += " AND n.agent = ?"
                     args.append(agent)
+                if kinds:
+                    sql += f" AND n.kind IN ({','.join('?' * len(kinds))})"
+                    args.extend(kinds)
                 sql += " ORDER BY rank LIMIT ?"
                 args.append(limit)
                 return [dict(r) for r in self.conn.execute(sql, args)]
@@ -207,14 +228,16 @@ class MemoryPalace:
         rows = [dict(r) for r in self.conn.execute("SELECT * FROM notes ORDER BY ts DESC")]
         if agent:
             rows = [r for r in rows if r["agent"] == agent]
+        if kinds:
+            rows = [r for r in rows if r["kind"] in kinds]
         scored = [(sum(t in (r["text"] or "").lower() for t in terms), r) for r in rows]
         return [r for s, r in sorted(scored, key=lambda kv: -kv[0]) if s][:limit]
 
-    def index_markdown(self, path: Path, agent: str) -> int:
-        """Mine an agent's memory.md into the palace, one heading section per note."""
+    def index_markdown(self, path: Path, agent: str, kind: str = "memory") -> int:
+        """Mine an agent's markdown into the palace, one heading section per note."""
         if not path.exists():
             return 0
-        self.conn.execute("DELETE FROM notes WHERE source=? AND kind='memory'", (str(path),))
+        self.conn.execute("DELETE FROM notes WHERE source=? AND kind=?", (str(path), kind))
         if self.fts:
             self.conn.execute("INSERT INTO notes_fts(notes_fts) VALUES('rebuild')")
         chunks, current = [], []
@@ -229,7 +252,7 @@ class MemoryPalace:
         n = 0
         for chunk in chunks:
             if chunk:
-                self.remember(chunk, agent=agent, kind="memory", source=str(path))
+                self.remember(chunk, agent=agent, kind=kind, source=str(path))
                 n += 1
         return n
 
@@ -359,17 +382,96 @@ class Hive:
                 out.append(ident)
         return out
 
-    def append_memory(self, agent: str, text: str, heading: str | None = None) -> None:
-        mem = self.mailbox(agent).dir / "memory.md"
+    def ensure_persona(self, name: str, factory: Any) -> dict[str, Any]:
+        """Read this agent's persona, minting one the first time it is asked for.
+
+        Stored in identity.json rather than derived on the fly, so an agent's
+        personality does not change because the trait tables in the source did.
+        `factory(name, role)` is passed in to keep the core free of any import
+        from the agent layer.
+        """
+        identity_file = self.mailbox(name).dir / "identity.json"
+        try:
+            identity = json.loads(identity_file.read_text())
+        except (json.JSONDecodeError, OSError):
+            return {}
+        persona = identity.get("persona")
+        if not persona:
+            persona = factory(name, identity.get("role", ""))
+            identity["persona"] = persona
+            atomic_write(identity_file, json.dumps(identity, indent=2, default=str))
+            self.event("agent.persona", {"name": name, **persona})
+        return persona
+
+    def by_role(self, role: str) -> list[str]:
+        """Enrolled agent names filling `role`.
+
+        Agents address each other by name, but a role wants whoever is doing the
+        job today: a mission staffed from the hive has a `pi` called `hugo`, not
+        one called `pi`, and hardcoding the role name posts mail to nobody.
+        """
+        return [a["name"] for a in self.roster() if a.get("role") == role]
+
+    def whois(self, who: str) -> str | None:
+        """Resolve a name or a role to an enrolled agent name."""
+        names = {a["name"] for a in self.roster()}
+        if who in names:
+            return who
+        filling = self.by_role(who)
+        return filling[0] if filling else None
+
+    def transcript(self, limit: int = 300) -> list[dict[str, Any]]:
+        """Every message on disk, oldest first, deduped by id.
+
+        A message exists in the sender's archive and again in the recipient's
+        inbox (then archive), so the same id turns up two or three times; the
+        conversation view wants each utterance once.
+        """
+        seen: dict[str, dict[str, Any]] = {}
+        base = self.root / "agents"
+        if not base.exists():
+            return []
+        for agent_dir in base.iterdir():
+            for box in ("inbox", "outbox", "archive"):
+                d = agent_dir / box
+                if not d.is_dir():
+                    continue
+                for f in messages(d):
+                    try:
+                        data = json.loads(f.read_text())
+                    except (json.JSONDecodeError, OSError):
+                        continue  # a writer is mid-replace
+                    mid = data.get("id")
+                    if mid and mid not in seen:
+                        data["delivered"] = box != "outbox"
+                        seen[mid] = data
+        ordered = sorted(seen.values(), key=lambda m: float(m.get("ts", 0.0)))
+        return ordered[-limit:] if limit else ordered
+
+    # Talk about the work and talk about the coffee rota are both real memories,
+    # and they live in separate files: one is evidence, the other is a running
+    # joke about a freezer that does not exist.
+    MEMORY_FILES = {"memory": "memory.md", "social": "social.md"}
+
+    def append_memory(self, agent: str, text: str, heading: str | None = None,
+                      kind: str = "memory") -> None:
+        mem = self.mailbox(agent).dir / self.MEMORY_FILES.get(kind, "memory.md")
         block = (f"\n## {heading}\n\n" if heading else "\n") + text.rstrip() + "\n"
         with open(mem, "a") as fh:
             fh.write(block)
-        self.palace.index_markdown(mem, agent)
+        self.palace.index_markdown(mem, agent, kind=kind)
 
     # -- routing -----------------------------------------------------------
     def route(self) -> int:
-        """Single-router design: only this method moves messages between agents,
-        so two agents never race on the same mailbox file."""
+        """Move every outbox message to its recipient's inbox.
+
+        Agents never move mail themselves, so the only routers are the mission
+        loop, the attendant and a `send(deliver=True)` -- and those can run at
+        once (the dashboard posts a message while the attendant is mid-round).
+        Each file is therefore *claimed* by moving it to the sender's archive
+        before it is delivered: `os.replace` is atomic, so exactly one router
+        wins and the loser skips a message that is no longer there.
+        """
         delivered = 0
         base = self.root / "agents"
         if not base.exists():
@@ -377,9 +479,14 @@ class Hive:
         names = [d.name for d in base.iterdir() if d.is_dir()]
         for sender in names:
             box = self.mailbox(sender)
-            for f in sorted(box.outbox.glob("*.json")):
+            for f in messages(box.outbox):
+                claimed = box.archive / f.name
                 try:
-                    data = json.loads(f.read_text())
+                    f.replace(claimed)
+                except OSError:
+                    continue  # another router claimed it first
+                try:
+                    data = json.loads(claimed.read_text())
                 except (json.JSONDecodeError, OSError):
                     continue
                 targets = [n for n in names if n != sender] \
@@ -394,7 +501,6 @@ class Hive:
                     delivered += 1
                 self.event("message.routed", {"from": sender, "to": data.get("recipient"),
                                               "topic": data.get("topic"), "id": data.get("id")})
-                f.replace(box.archive / f.name)
         return delivered
 
     def send(self, sender: str, recipient: str, topic: str,

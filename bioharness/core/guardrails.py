@@ -109,6 +109,7 @@ class Guardrails:
 
     budget: Budget = field(default_factory=Budget)
     breaker: CircuitBreaker = field(default_factory=CircuitBreaker)
+    intervention: "Intervention" = field(default_factory=lambda: Intervention())
     dry_run: bool = False
     allow_network: bool = True
     confirm_destructive: bool = True
@@ -123,6 +124,43 @@ class Guardrails:
         self.budget.charge(steps=1, tokens=tokens, usd=usd,
                            cpu_hours=cpu * hours, gpu_hours=gpu * hours)
         (self.breaker.record_success if ok else self.breaker.record_failure)(capability)
+
+    def permit(self, actor: dict[str, Any] | None, capability: str,
+               domain: str = "") -> tuple[bool, str]:
+        """May `actor` execute `capability`? The autonomy ladder, enforced.
+
+        Until this existed the four levels were a label: nothing consulted them,
+        so `read_only` restrained nothing and `full` granted nothing. A refusal
+        returns a reason rather than raising, so a blocked step is recorded in
+        the run like any other outcome instead of taking the mission down.
+        """
+        if actor is None:                      # a human at the CLI
+            return True, ""
+        name = str(actor.get("name", "?"))
+        declared = Autonomy(actor.get("autonomy") or Autonomy.BOUNDED)
+        effective = self.intervention.autonomy_for(name, declared)
+        if effective is not declared:
+            note = f" (dropped from {declared.value} by intervention)"
+        else:
+            note = ""
+
+        if effective is Autonomy.READ_ONLY:
+            return False, f"{name} is read_only: may plan and inspect, never execute{note}"
+        if effective is Autonomy.SUGGEST:
+            return False, (f"{name} is suggest: {capability} needs a human to "
+                           f"approve it{note}")
+        if effective is Autonomy.FULL:
+            return True, ""
+
+        scope = [str(x) for x in (actor.get("scope") or [])]
+        if not scope:
+            return False, (f"{name} is bounded with no declared scope, so it may "
+                           f"run nothing. Hire or assign it with --scope, or "
+                           f"raise it to full.")
+        if capability in scope or (domain and f"domain:{domain}" in scope):
+            return True, ""
+        return False, (f"{capability} is outside {name}'s scope "
+                       f"({', '.join(scope)}){note}")
 
     def status(self) -> dict[str, Any]:
         return {

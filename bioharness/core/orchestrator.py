@@ -58,7 +58,14 @@ class Orchestrator:
 
     # -- execution ---------------------------------------------------------
     def run(self, workflow: Workflow, params: dict[str, Any] | None = None,
-            stop_on_failure: bool = True) -> dict[str, Any]:
+            stop_on_failure: bool = True,
+            actor: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Execute a workflow. `actor` is the agent asking, or None for a human.
+
+        The autonomy check lives here because the orchestrator is the single
+        committer: gate the one place that starts work and no agent can slip a
+        step past it.
+        """
         merged = {**workflow.params, **(params or {})}
         self.ws.create({
             "workflow": workflow.name, "description": workflow.description,
@@ -95,6 +102,20 @@ class Orchestrator:
                 task = self._skipped(step, f"guard `{step.when}` not satisfied")
                 results[step.id] = task
                 self.tasks.append(task)
+                continue
+
+            allowed, why = self.rails.permit(actor, step.capability,
+                                             self._domain(step.capability))
+            if not allowed:
+                task = self._blocked(step, why)
+                results[step.id] = task
+                self.tasks.append(task)
+                self._event("step.blocked", {"step": step.id, "actor":
+                                             (actor or {}).get("name", "human"),
+                                             "reason": why})
+                if stop_on_failure:
+                    self._event("workflow.halted", {"step": step.id, "error": why})
+                    break
                 continue
 
             try:
@@ -192,6 +213,18 @@ class Orchestrator:
                     capability=step.capability, status=Status.SKIPPED, error=reason)
         self.ws.record_task(task)
         return task
+
+    def _blocked(self, step: Step, reason: str) -> Task:
+        task = Task(id=new_id("task"), run_id=self.ws.run_id, step_id=step.id,
+                    capability=step.capability, status=Status.BLOCKED, error=reason)
+        self.ws.record_task(task)
+        return task
+
+    def _domain(self, capability: str) -> str:
+        try:
+            return self.registry.get(capability).domain
+        except Exception:  # noqa: BLE001 - an unknown capability fails later, clearly
+            return ""
 
     def _failed(self, step: Step, reason: str) -> Task:
         task = Task(id=new_id("task"), run_id=self.ws.run_id, step_id=step.id,

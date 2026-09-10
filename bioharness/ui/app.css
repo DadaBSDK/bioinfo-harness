@@ -251,3 +251,49 @@ button.mini {
   color: var(--muted); font: 11px var(--mono); padding: 3px 8px; cursor: pointer;
 }
 button.mini:hover { border-color: var(--fail); color: var(--fail); }
+
+/* speech bubbles on the floor */
+.bubble-box {
+  fill: var(--panel); stroke: var(--ink); stroke-width: 1.2; opacity: .96;
+}
+.bubble-text { font: 10px/1.3 -apple-system, sans-serif; fill: var(--ink); }
+.bubble-to { font: 8px var(--mono); fill: var(--muted); }
+
+/* conversation tab */
+.chatlog {
+  max-height: calc(100vh - 120px); overflow-y: auto; padding: 4px 2px 10px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.turn { display: flex; gap: 9px; align-items: flex-start; }
+.turn.me { flex-direction: row-reverse; }
+.turn .av {
+  width: 28px; height: 28px; flex: none; border-radius: 50%; color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font: 600 11px var(--mono);
+}
+.turn .bub {
+  max-width: 640px; padding: 7px 11px 8px; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--panel);
+}
+.turn.me .bub { background: var(--accent-soft); border-color: var(--accent-soft); }
+.turn .who {
+  display: flex; gap: 7px; align-items: baseline; flex-wrap: wrap;
+  font: 11px var(--mono); color: var(--muted); margin-bottom: 3px;
+}
+.turn .who b { color: var(--ink); font-family: inherit; }
+.turn .role { color: var(--accent); }
+.turn .tp {
+  padding: 0 5px; border: 1px solid var(--line); border-radius: 4px;
+}
+.turn .ts { margin-left: auto; }
+.turn .say { white-space: pre-wrap; font-size: 13px; }
+.turn .pending { margin-top: 4px; font: 11px var(--mono); color: var(--run); }
+.turn .say code {
+  font: 12px var(--mono); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 4px; padding: 0 4px;
+}
+
+/* who someone is, as opposed to what they do */
+.who-line { font-size: 12px; color: var(--muted); margin-top: 4px; font-style: italic; }
+.turn.social .bub { background: var(--bg); border-style: dashed; }
+.turn.social .say { color: var(--muted); font-style: italic; }

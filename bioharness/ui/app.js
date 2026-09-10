@@ -1,12 +1,13 @@
 'use strict';
 
 const $ = (s, r = document) => r.querySelector(s);
-const TABS = ['floor', 'runs', 'hive', 'caps', 'cost'];
+const TABS = ['floor', 'chat', 'runs', 'hive', 'caps', 'cost'];
 const CC_TABS = ['activity', 'workers', 'staff', 'memory', 'tasks', 'graph'];
 
 const state = {
   tab: 'floor', cc: 'activity', runId: null, agent: null,
   runs: [], detail: null, hive: null, caps: null, overview: null, floor: null,
+  chat: [], chatSeen: 0,
   log: null, logTab: 'stderr', sent: '', sending: false,
   staffOptions: null, hireMsg: '', hiring: false,
   // Kept in state so a repaint never discards a half-filled form.
@@ -216,6 +217,36 @@ function buildRoute(fx, fy, tx, ty) {
   return pts;
 }
 
+// -- speech bubbles --------------------------------------------------------
+// An utterance hangs over the speaker's head for a few seconds. Long enough to
+// read at a glance, short enough that a busy room does not become a wall.
+const BUBBLE_MS = 8000;
+const BUBBLE_COLS = 34;        // characters per line
+const BUBBLE_LINES = 3;        // then it is truncated; the chat tab has the rest
+const BUBBLE_CH = 5.6;         // width of one character at 10px
+const BUBBLE_LH = 13;
+
+// Models answer in markdown. A 34-column bubble has no room to render it, so
+// the markers are stripped rather than shown as literal asterisks.
+const demark = t => String(t || '').replace(/\*\*|__|`/g, '').replace(/^#+\s*/gm, '');
+
+function wrapLines(text, cols = BUBBLE_COLS, max = BUBBLE_LINES) {
+  const words = demark(text).replace(/\s+/g, ' ').trim().split(' ');
+  const lines = [];
+  let line = '';
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (next.length <= cols) { line = next; continue; }
+    if (line) lines.push(line);
+    line = w.length > cols ? w.slice(0, cols - 1) + '…' : w;
+    if (lines.length === max) break;
+  }
+  if (line && lines.length < max) lines.push(line);
+  if (lines.length === max && words.join(' ').length >
+      lines.join(' ').length) lines[max - 1] = lines[max - 1].slice(0, cols - 1) + '…';
+  return lines;
+}
+
 // -- the world -------------------------------------------------------------
 const WORLD = { actors: {}, seen: new Set(), raf: 0, last: 0, hover: null };
 
@@ -237,20 +268,48 @@ function syncWorld() {
     if (!pos[name]) delete WORLD.actors[name];
   }
 
-  // A routed message becomes an errand: the sender walks over, pauses at the
-  // recipient's desk, then heads back. The animation is driven by real events.
+  // A routed message becomes an errand: the sender walks over to the person,
+  // pauses with them, then heads back. Walking to the recipient's *desk* had
+  // the two of them swap rooms whenever they replied to each other -- the PI
+  // marching to the lobby while the human marched to the planning office.
   const now = Date.now() / 1000;
+  const TALKING_DISTANCE = 74;
   for (const t of state.floor?.traffic || []) {
     const key = `${t.from}>${t.to}@${t.ts}`;
     if (WORLD.seen.has(key)) continue;
     WORLD.seen.add(key);
     if (now - t.ts > 45) continue;            // don't replay old history on load
-    const from = WORLD.actors[t.from], target = pos[t.to];
-    if (!from || !target || t.from === t.to) continue;
-    const spot = sanitizeTarget(target.x + 34, target.y);
+    const from = WORLD.actors[t.from], to = WORLD.actors[t.to];
+    if (!from || !to || t.from === t.to) continue;
+
+    // Whoever is being spoken to stays put long enough to be reached, instead
+    // of wandering back to their station mid-sentence.
+    to.wait = Math.max(to.wait, 2.4);
+    if (Math.hypot(to.x - from.x, to.y - from.y) < TALKING_DISTANCE) {
+      from.path = [];                        // already face to face: just talk
+      from.errand = { to: t.to, topic: t.topic };
+      from.wait = Math.max(from.wait, 1.8);
+      from.facing = to.x < from.x ? -1 : 1;
+      continue;
+    }
+    const side = to.x > FW / 2 ? -34 : 34;   // stand beside them, not on them
+    const spot = sanitizeTarget(to.x + side, to.y);
     from.path = buildRoute(from.x, from.y, spot.x, spot.y);
     from.errand = { to: t.to, topic: t.topic };
     from.wait = 1.8;
+  }
+
+  // What was actually said, over the speaker's head. Old lines are skipped on
+  // first load so opening the tab does not replay the whole mission at once.
+  for (const c of state.floor?.chatter || []) {
+    const key = `say:${c.id}`;
+    if (WORLD.seen.has(key)) continue;
+    WORLD.seen.add(key);
+    if (now - c.ts > 30) continue;
+    const act = WORLD.actors[c.sender];
+    if (!act || !c.say) continue;
+    act.bubble = { lines: wrapLines(c.say), to: c.recipient,
+                   until: performance.now() + BUBBLE_MS };
   }
 }
 
@@ -487,7 +546,7 @@ function floorOverlay() {
     </g>`).join('');
 
   return `<rect class="floorhit" x="0" y="0" width="${FW}" height="${FH}"/>
-          <g class="wires"></g>${labels}${people}`;
+          <g class="wires"></g>${labels}${people}<g class="bubbles"></g>`;
 }
 
 function paintOverlay() {
@@ -511,6 +570,8 @@ function paintOverlay() {
     g.classList.toggle('on', state.agent === name);
   }
 
+  paintBubbles(svg);
+
   // Wires are redrawn each frame because their endpoints are moving.
   const wires = svg.querySelector('.wires');
   if (!wires) return;
@@ -524,6 +585,53 @@ function paintOverlay() {
         (Math.min(ay, by) - 44).toFixed(1)} ${b.x.toFixed(1)},${by.toFixed(1)}`;
       return `<path class="wire" d="${d}"/>`;
     }).join('');
+}
+
+// Bubbles live in the SVG layer rather than in HTML above it, so they inherit
+// the same viewBox mapping as the labels and stay pinned to a moving sprite.
+function paintBubbles(svg) {
+  const layer = svg.querySelector('.bubbles');
+  if (!layer) return;
+  const now = performance.now();
+  const parts = [];
+  // Two people at neighbouring desks talk at the same time often enough that
+  // overlapping bubbles look like a bug. Anything that would cover a bubble
+  // already placed gets lifted above it instead.
+  const placed = [];
+  const speakers = Object.values(WORLD.actors)
+    .filter(a => a.bubble && a.bubble.until >= now)
+    .sort((a, b) => a.y - b.y || a.x - b.x);
+  for (const act of Object.values(WORLD.actors)) {
+    if (act.bubble && act.bubble.until < now) act.bubble = null;
+  }
+  for (const act of speakers) {
+    const b = act.bubble;
+    const widest = Math.max(...b.lines.map(l => l.length), 8);
+    const w = Math.round(widest * BUBBLE_CH) + 18;
+    const h = b.lines.length * BUBBLE_LH + 16;
+    const cx = Math.min(FW - w / 2 - 6, Math.max(w / 2 + 6, act.x));
+    let bottom = act.y - CHAR_H - 16;
+    const hits = box => placed.some(q => box.x < q.x + q.w && box.x + w > q.x
+                                      && box.y < q.y + q.h && box.y + h > q.y);
+    while (hits({ x: cx - w / 2, y: bottom - h, w, h }) && bottom - h > 4) {
+      bottom -= h + 6;
+    }
+    const x = cx - w / 2, y = bottom - h;
+    placed.push({ x, y, w, h });
+    const fade = Math.min(1, (b.until - now) / 1200);
+    const tail = `${cx - 6},${bottom} ${cx + 6},${bottom} ${act.x},${bottom + 11}`;
+    const text = b.lines.map((l, i) =>
+      `<tspan x="${(x + 9).toFixed(1)}" y="${(y + 18 + i * BUBBLE_LH).toFixed(1)}"
+       >${esc(l)}</tspan>`).join('');
+    parts.push(`<g class="bubble" opacity="${fade.toFixed(2)}">
+      <rect class="bubble-box" x="${x.toFixed(1)}" y="${y.toFixed(1)}"
+            width="${w}" height="${h}" rx="7"/>
+      <polygon class="bubble-box" points="${tail}"/>
+      <text class="bubble-text">${text}</text>
+      <text class="bubble-to" x="${(x + w - 8).toFixed(1)}" y="${(y - 4).toFixed(1)}"
+            text-anchor="end">→ ${esc(b.to || '')}</text></g>`);
+  }
+  layer.innerHTML = parts.join('');
 }
 
 function renderFloor() {
@@ -602,6 +710,9 @@ function ccActivity() {
               : '<div class="empty">No events yet.</div>';
 }
 
+const personaBrief = p => !p ? '' :
+  `${p.temperament}; into ${p.interest}; cannot stand ${p.peeve}`;
+
 function ccWorkers() {
   const agents = state.floor?.agents || [];
   if (!agents.length) return '<div class="empty">No agents enrolled.</div>';
@@ -609,6 +720,7 @@ function ccWorkers() {
       <div style="display:flex;gap:8px;align-items:center">
         <b>${esc(a.name)}</b> ${chip(a.status)}
         <span style="margin-left:auto" class="mono">${esc(a.role)}</span></div>
+      ${a.persona ? `<div class="who-line">${esc(personaBrief(a.persona))}</div>` : ''}
       <div class="kv" style="margin-top:6px">
         <span class="k">provider</span> ${esc(a.provider)} ·
         <span class="k">autonomy</span> ${esc(a.autonomy || '—')} ·
@@ -702,7 +814,8 @@ function ccBody() {
            memory: ccMemory, tasks: ccTasks, graph: ccGraph }[state.cc]();
 }
 
-const TOPICS = ['goal', 'plan.request', 'data.validate', 'qc.check', 'analyze', 'report'];
+const TOPICS = ['goal', 'peer.ask', 'smalltalk', 'greet', 'plan.request',
+                'data.validate', 'qc.check', 'analyze', 'report'];
 
 // Built once per tab switch. Everything that ticks is updated in place below,
 // so the message box is never destroyed under the user's cursor.
@@ -775,7 +888,8 @@ function paintFloor() {
 function workerStripInner() {
   const agents = state.floor?.agents || [];
   return agents.map(a => `
-    <div class="wcard ${state.agent === a.name ? 'on' : ''}" data-agent="${esc(a.name)}">
+    <div class="wcard ${state.agent === a.name ? 'on' : ''}" data-agent="${esc(a.name)}"
+         title="${esc(personaBrief(a.persona))}">
       <div class="av" style="background:${avatarFill(a.name)}">${esc(initials(a.name))}</div>
       <div><div class="nm">${esc(a.name)}</div><div class="rl">${esc(a.role)}</div></div>
       <div style="margin-left:auto">${chip(a.status)}</div>
@@ -850,6 +964,55 @@ function renderDag(graph, tasks, compact = false) {
 // ==========================================================================
 // Classic views
 // ==========================================================================
+// ==========================================================================
+// Conversation -- the roster's messages read back as an exchange
+// ==========================================================================
+const TOPIC_LABEL = {
+  'peer.ask': 'asks', 'peer.reply': 'answers', 'goal': 'mission',
+  'plan.request': 'plan?', 'data.validate': 'check inputs',
+  'qc.check': 'qc gate', 'analyze': 'interpret', 'report': 'write up',
+  'greet': 'says hi', 'greet.reply': 'hi back', 'smalltalk': 'chat',
+  'run.request': 'run it', 'run.request.result': 'ran it',
+};
+// Talk that is not about the work reads differently from a work order.
+const SOCIAL_TOPICS = ['greet', 'greet.reply', 'smalltalk'];
+
+// Escape first, then promote the two markdown forms an agent actually uses.
+// Order matters: doing it the other way round would let a message inject HTML.
+function richSay(text) {
+  return esc(text)
+    .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`\n]+)`/g, '<code>$1</code>');
+}
+
+function chatTurn(c) {
+  const human = c.sender === 'human';
+  const label = TOPIC_LABEL[c.topic] || c.topic;
+  const social = SOCIAL_TOPICS.includes(c.topic) ? ' social' : '';
+  return `<div class="turn ${human ? 'me' : ''}${social}">
+    <div class="av" style="background:${avatarFill(c.sender)}"
+         title="${esc(c.sender_role || '')}">${esc(initials(c.sender))}</div>
+    <div class="bub">
+      <div class="who"><b>${esc(c.sender)}</b>
+        ${c.sender_role ? `<span class="role">${esc(c.sender_role)}</span>` : ''}
+        <span class="to">→ ${esc(c.recipient)}</span>
+        <span class="tp">${esc(label)}</span>
+        <span class="ts">${clock(c.ts)}</span></div>
+      <div class="say">${richSay(c.say)}</div>
+      ${c.delivered ? '' : '<div class="pending">undelivered — still in the outbox</div>'}
+    </div></div>`;
+}
+
+function viewChat() {
+  const rows = state.chat || [];
+  if (!rows.length) {
+    return `<div class="empty">Nothing said yet. Start a mission and the roster
+      will talk here:<br><br>
+      <code>bioharness mission "call variants in this sample"</code></div>`;
+  }
+  return `<div class="chatlog" id="chatlog">${rows.map(chatTurn).join('')}</div>`;
+}
+
 function viewRuns() {
   const d = state.detail;
   if (!d) return `<div class="empty">No runs yet. Try:<br><br>
@@ -1006,8 +1169,18 @@ function render() {
   const shell = $('#shell');
   if (shell.contains(document.activeElement) &&
       /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
-  const view = { runs: viewRuns, hive: viewHive, caps: viewCaps, cost: viewCost }[state.tab];
+  const view = { chat: viewChat, runs: viewRuns, hive: viewHive,
+                 caps: viewCaps, cost: viewCost }[state.tab];
+  // The transcript is rebuilt wholesale like every other classic view, so the
+  // scroll position has to be carried across by hand -- and only followed to
+  // the bottom if the reader was already there, never while they read history.
+  const before = $('#chatlog');
+  const stick = !before ||
+    before.scrollHeight - before.scrollTop - before.clientHeight < 60;
+  const was = before ? before.scrollTop : 0;
   shell.innerHTML = `<div class="classic">${sidebar()}<section>${view()}</section></div>`;
+  const log = $('#chatlog');
+  if (log) log.scrollTop = stick ? log.scrollHeight : was;
 }
 
 async function refresh(full = false) {
@@ -1017,6 +1190,9 @@ async function refresh(full = false) {
     state.runs = runs; state.overview = overview; state.floor = floor;
     if (!state.runId && runs.length) state.runId = runs[0].run_id;
     if (state.runId) state.detail = await api(`/api/runs/${state.runId}`).catch(() => null);
+    if (state.tab === 'chat') {
+      state.chat = await api('/api/conversation?limit=200').catch(() => state.chat);
+    }
     if (state.tab === 'hive' || full || !state.hive) state.hive = await api('/api/hive');
     if ((state.tab === 'caps' && !state.caps) || full) state.caps = await api('/api/caps');
     if (!state.staffOptions) {
@@ -1088,7 +1264,12 @@ async function sendMessage() {
   if (!text) return;
   state.sending = true; render();
   const to = $('#qto')?.value, topic = $('#qtopic')?.value || 'goal';
-  const body = topic === 'goal' ? { goal: text } : { note: text };
+  // Each topic wants its own field name; `peer.ask` posts a question, and
+  // sending one as `note` would reach the agent with nothing to answer.
+  const body = topic === 'goal' ? { goal: text }
+    : topic === 'peer.ask' ? { question: text, hops: 0 }
+    : ['smalltalk', 'greet'].includes(topic) ? { line: text, hops: 0 }
+    : { note: text };
   const r = await api('/api/message', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ to, topic, body }),

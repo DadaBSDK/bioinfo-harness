@@ -131,9 +131,14 @@ class Dashboard:
 
         runs = self.run_list()
         current = runs[0] if runs else None
+        # Bubbles are drawn from the last few utterances; the floor only needs
+        # the line, not the whole message body.
+        chatter = [{k: v for k, v in c.items() if k != "body"}
+                   for c in self.conversation(limit=40)][-25:]
         return {
             "agents": agents,
             "traffic": traffic,
+            "chatter": chatter,
             "activity": events[-80:][::-1],
             "current_run": current,
             "cost": hive.cost_ledger(),
@@ -141,7 +146,27 @@ class Dashboard:
                            for k in hive.blackboard.keys()],
         }
 
-    ROLES_AVAILABLE = ("pi", "planner", "curator", "validator", "analyst", "scribe")
+    def conversation(self, limit: int = 200) -> list[dict[str, Any]]:
+        """The roster's messages as a readable exchange, oldest first."""
+        hive = self.hive()
+        roles = {a["name"]: a.get("role", "") for a in hive.roster()}
+        out = []
+        for m in hive.transcript(limit=limit):
+            out.append({
+                "id": m.get("id", ""),
+                "sender": m.get("sender", ""),
+                "recipient": m.get("recipient", ""),
+                "sender_role": roles.get(m.get("sender", ""), ""),
+                "topic": m.get("topic", ""),
+                "ts": float(m.get("ts", 0.0)),
+                "say": _say(m),
+                "delivered": bool(m.get("delivered", True)),
+                "body": m.get("body", {}),
+            })
+        return out
+
+    ROLES_AVAILABLE = ("pi", "planner", "curator", "runner", "validator",
+                       "analyst", "scribe")
 
     def staff_options(self) -> dict[str, Any]:
         """What the hire form may offer, and whether each backend works here."""
@@ -199,7 +224,8 @@ class Dashboard:
     NAME_OK = re.compile(r"^[a-z][a-z0-9_-]{1,30}$")
 
     def hire(self, name: str, role: str, provider: str = "builtin",
-             model: str = "", autonomy: str = "bounded") -> dict[str, Any]:
+             model: str = "", autonomy: str = "bounded",
+             scope: list[str] | None = None) -> dict[str, Any]:
         from .agents.api_provider import MODELS
         from .agents.base import PROVIDERS
         from .agents.gemini_provider import available_models
@@ -243,14 +269,16 @@ class Dashboard:
         # builtin or CLI agent just makes the roster lie about what it runs.
         model = model if provider in ("claude-api", "gemini-api", "ollama",
                                       "antigravity") else ""
-        identity = hive.enroll(name, role, provider=provider,
-                               model=model, autonomy=autonomy)
+        identity = hive.enroll(name, role, provider=provider, model=model,
+                               autonomy=autonomy, scope=list(scope or []))
+        from .agents import persona as persona_mod
+        identity["persona"] = hive.ensure_persona(name, persona_mod.make)
         hive.event("agent.hired", {"name": name, "role": role,
                                    "provider": provider, "model": model})
         return {"ok": True, "agent": identity}
 
     def assign(self, names: list[str], provider: str, model: str = "",
-               autonomy: str = "") -> dict[str, Any]:
+               autonomy: str = "", scope: list[str] | None = None) -> dict[str, Any]:
         """Point one or more existing agents at a different backend."""
         opts = self.staff_options()
         known = {p["id"] for p in opts["providers"]}
@@ -275,7 +303,8 @@ class Dashboard:
                 continue
             if hive.retarget(name, provider=provider,
                              model=model if provider != "builtin" else "",
-                             autonomy=autonomy or None):
+                             autonomy=autonomy or None,
+                             scope=list(scope) if scope is not None else None):
                 changed.append(name)
         return {"ok": bool(changed), "changed": changed, "missing": missing,
                 "provider": provider, "model": model,
@@ -292,7 +321,8 @@ class Dashboard:
     # an agent's mailbox. Recipient must already be enrolled, topic must be
     # one the roster actually handles.
     ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
-                      "qc.check", "analyze", "report")
+                      "qc.check", "analyze", "report", "peer.ask",
+                      "smalltalk", "greet", "run.request")
 
     def send_message(self, to: str, topic: str, body: dict[str, Any]) -> dict[str, Any]:
         hive = self.hive()
@@ -304,6 +334,10 @@ class Dashboard:
                     "error": f"topic {topic!r} not allowed; use one of {list(self.ALLOWED_TOPICS)}"}
         if "human" not in names:
             hive.enroll("human", "operator")
+        if topic in ("smalltalk", "greet") and "line" not in body:
+            # The composer posts free text; these topics read it as `line`.
+            body = {**body, "line": body.get("note") or body.get("goal", ""),
+                    "hops": 0}
         msg = hive.send("human", to, topic, body)
         hive.event("message.queued_by_human", {"to": to, "topic": topic, "id": msg.id})
         return {"ok": True, "id": msg.id, "to": to, "topic": topic}
@@ -414,6 +448,41 @@ class Dashboard:
             return None
 
 
+def _say(m: dict[str, Any]) -> str:
+    """One line of plain English for a message, for the conversation view.
+
+    Falls back to compact JSON rather than to an empty bubble: an unrecognised
+    topic should still show what was actually said.
+    """
+    topic = m.get("topic", "")
+    body = m.get("body", {}) or {}
+    # An answer carries the question it answers, so `answer` must be checked
+    # first -- otherwise every reply shows as an echo of what was asked.
+    # `instruction` is what a dispatched agent was actually told to do; without
+    # it a tasking message renders as the whole JSON body of its work item.
+    for key in ("line", "answer", "question", "instruction", "goal", "summary",
+                "reason", "error"):
+        if body.get(key):
+            return str(body[key]).strip()
+    if topic.endswith(".result") or topic in ("data.validate", "qc.check"):
+        bits = []
+        if "verdict" in body:
+            bits.append(str(body["verdict"]))
+        if "ok" in body:
+            bits.append("ok" if body["ok"] else "not ok")
+        for key in ("problems", "failures", "briefed", "candidates"):
+            if body.get(key):
+                bits.append(f"{len(body[key])} {key}")
+        if body.get("workflow"):
+            wf = body["workflow"]
+            steps = wf.get("steps", []) if isinstance(wf, dict) else []
+            bits.append(" → ".join(s.get("capability", "?") for s in steps) or "workflow")
+        if bits:
+            return ", ".join(bits)
+    text = json.dumps(body, default=str)
+    return text if len(text) <= 220 else text[:217] + "…"
+
+
 def _msg(m: Any) -> dict[str, Any]:
     return {"id": m.id, "sender": m.sender, "recipient": m.recipient,
             "topic": m.topic, "body": m.body, "ts": m.ts}
@@ -456,6 +525,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(d.floor_state())
         if route == "/api/hive":
             return self._send_json(d.hive_state())
+        if route == "/api/conversation":
+            return self._send_json(d.conversation(
+                int(query.get("limit", ["200"])[0])))
         if route == "/api/caps":
             return self._send_json(d.caps())
         if route == "/api/recall":
@@ -494,13 +566,15 @@ class Handler(BaseHTTPRequestHandler):
                 name=str(payload.get("name", "")), role=str(payload.get("role", "")),
                 provider=str(payload.get("provider", "builtin")),
                 model=str(payload.get("model", "")),
-                autonomy=str(payload.get("autonomy", "bounded")))
+                autonomy=str(payload.get("autonomy", "bounded")),
+                scope=payload.get("scope"))
         elif route == "/api/staff/assign":
             result = self.dash.assign(
                 names=list(payload.get("names") or []),
                 provider=str(payload.get("provider", "")),
                 model=str(payload.get("model", "")),
-                autonomy=str(payload.get("autonomy", "")))
+                autonomy=str(payload.get("autonomy", "")),
+                scope=payload.get("scope"))
         else:
             result = self.dash.fire(str(payload.get("name", "")))
         return self._send_json(result, status=200 if result.get("ok") else 400)
