@@ -23,8 +23,6 @@ def line_of(m: dict[str, Any]) -> str:
     """One line of plain English for a message, falling back to compact JSON."""
     topic = m.get("topic", "")
     body = m.get("body", {}) or {}
-    # Field priority: `answer` before the question it echoes, and `instruction`
-    # for dispatched work items.
     for key in ("position", "line", "answer", "question", "instruction", "goal",
                 "order", "summary", "reason", "error"):
         if body.get(key):
@@ -55,7 +53,7 @@ def orders(hive: Hive, limit: int = 25) -> list[dict[str, Any]]:
         if m.get("sender") != "human" or not m.get("thread"):
             continue
         if m["thread"] != m.get("id"):
-            continue                      # follow-up inside another thread
+            continue
         out.append({"thread": m["thread"], "ts": float(m.get("ts", 0.0)),
                     "to": m.get("recipient", ""), "topic": m.get("topic", ""),
                     "order": line_of(m)})
@@ -87,7 +85,6 @@ def gather(hive: Hive, thread: str) -> dict[str, Any]:
             "ts": float(m.get("ts", 0.0)),
         }
 
-    # Include agents who spoke in the thread without returning a verdict.
     said: dict[str, str] = {}
     for m in msgs:
         if m["sender"] in ("human",) or m.get("topic") == "verdict":
@@ -98,7 +95,6 @@ def gather(hive: Hive, thread: str) -> dict[str, Any]:
     runs = [e["payload"] for e in hive.events("workflow.finished")
             if started <= e["ts"] <= ended + 5]
 
-    # Artifacts live in each run's ledger, so read them from the run directory.
     artifacts: list[dict[str, Any]] = []
     for run in runs:
         ledger = Path(str(run.get("dir", ""))) / "ledger.jsonl"
@@ -123,10 +119,7 @@ def gather(hive: Hive, thread: str) -> dict[str, Any]:
         acc["usd"] += c.get("usd", 0.0)
 
     ran_ok = [r for r in runs if r.get("status") == "ok"]
-    # Inputs the operator must supply: from the PI's held plan, the runner's
-    # refusal, and each verdict's `needs`.
     asked: list[str] = []
-    # `needs` messages first: they name exact parameters.
     for topics in (("needs",), ("verdict",), None):
         for m in msgs:
             topic = m.get("topic", "")

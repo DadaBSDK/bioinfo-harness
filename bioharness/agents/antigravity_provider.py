@@ -22,7 +22,6 @@ from .base import LLMReply, ProviderUnavailable
 BINARY = "agy"
 EFFORTS = ("low", "medium", "high")
 
-# Generous timeout: CLI startup and auth dominate, not inference.
 LIST_TIMEOUT = 60.0
 
 
@@ -30,7 +29,6 @@ def binary_present() -> bool:
     return shutil.which(BINARY) is not None
 
 
-# Model listing spawns the CLI, so results are cached briefly.
 _CACHE: dict[str, Any] = {"models": None, "at": 0.0}
 CACHE_TTL = 300.0
 
@@ -70,7 +68,6 @@ class AntigravityProvider:
     name: str = "antigravity"
     model: str = ""
     effort: str = ""
-    # JSON schema the CLI enforces on the reply, when set.
     json_schema: str = ""
     timeout_s: float = 600.0
     _models: list[str] = field(default_factory=list)
@@ -83,7 +80,7 @@ class AntigravityProvider:
         if not binary_present():
             return False
         if not self.model:
-            return True          # let the CLI pick its own default
+            return True
         return self.model in (self._models or self.refresh())
 
     def unavailable_reason(self) -> str:
@@ -100,8 +97,6 @@ class AntigravityProvider:
         reply = self._ask_once(prompt, cwd, env, schema=self.json_schema)
         if reply.text or not self.json_schema:
             return reply
-        # Higher-effort tiers sometimes return empty output for schema-constrained
-        # prompts; retry once without the schema.
         retry = self._ask_once(prompt, cwd, env, schema="")
         retry.tokens_in += reply.tokens_in
         retry.tokens_out += reply.tokens_out
@@ -150,11 +145,8 @@ class AntigravityProvider:
                 retryable=status in ("TIMEOUT", "RATE_LIMITED", "UNAVAILABLE"))
 
         usage = data.get("usage") or {}
-        # Count thinking tokens as output; they are billed as such.
         generated = (int(usage.get("output_tokens") or 0)
                      + int(usage.get("thinking_tokens") or 0))
-        # With --json-schema, prefer `structured_output` over `response`, which may
-        # be empty or wrapped in a code fence.
         structured = data.get("structured_output")
         text = (json.dumps(structured) if structured is not None
                 else str(data.get("response", "")))
@@ -166,7 +158,7 @@ class AntigravityProvider:
             tokens_in=(int(usage.get("input_tokens") or 0)
                        + int(usage.get("cache_read_tokens") or 0)),
             tokens_out=generated,
-            usd=0.0,          # billed through the Antigravity plan, not per call
+            usd=0.0,
         )
 
 
@@ -186,7 +178,7 @@ def warm_models() -> None:
     def run() -> None:
         try:
             available_models(refresh=True)
-        except Exception:  # noqa: BLE001 - warm-up is best effort
+        except Exception:
             pass
         finally:
             _CACHE["warming"] = False

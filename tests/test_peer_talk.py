@@ -68,7 +68,6 @@ def test_pi_briefs_every_other_agent(ctx: AgentContext):
     result = hugo.handle(_msg(ctx, "human", "hugo", "goal", goal="assemble a genome"))
     ctx.hive.route()
     assert sorted(d["to"] for d in result["dispatched"]) == ["ada", "iris", "quill"]
-    # The planner gets real work; the others are asked, having nothing to work on.
     assert [m.topic for m in ctx.hive.mailbox("ada").peek()] == ["plan.request"]
     assert [m.topic for m in ctx.hive.mailbox("iris").peek()] == ["peer.ask"]
 
@@ -139,7 +138,7 @@ def test_asking_a_role_nobody_fills_is_recorded_not_raised(ctx: AgentContext):
 
 def test_an_agent_without_a_provider_still_answers(ctx: AgentContext):
     ctx.hive.enroll("ada", "planner")
-    iris = Curator("iris", ctx)          # builtin: no LLM at all
+    iris = Curator("iris", ctx)
     ctx.hive.send("ada", "iris", "peer.ask", {"question": "thoughts?"})
     iris.tick()
     ctx.hive.route()
@@ -162,7 +161,6 @@ def _msg(ctx: AgentContext, sender: str, to: str, topic: str, **body):
     return ctx.hive.mailbox(sender).send(to, topic, body)
 
 
-# -- the PI splitting work up ----------------------------------------------
 class JSONProvider(StubProvider):
     """A provider that answers with whatever JSON it was constructed with."""
 
@@ -183,7 +181,6 @@ def test_pi_without_a_provider_still_splits_the_work(ctx: AgentContext):
     result = hugo.handle(_msg(ctx, "human", "hugo", "goal", goal="assemble a genome"))
     ctx.hive.route()
     assert result["ok"]
-    # Only the planner has inputs; the others are asked, not tasked.
     assert [m.topic for m in ctx.hive.mailbox("ada").peek()] == ["plan.request"]
     assert [m.topic for m in ctx.hive.mailbox("iris").peek()] == ["peer.ask"]
     assert [m.topic for m in ctx.hive.mailbox("vera").peek()] == ["peer.ask"]
@@ -210,7 +207,6 @@ def test_pi_follows_its_own_orders(ctx: AgentContext):
     assert [d["role"] for d in result["dispatched"]] == ["planner", "analyst"]
     assert result["reasoning"].startswith("Route it first")
     assert ctx.hive.mailbox("ada").peek()[0].body["instruction"] == "Route fastq to vcf."
-    # The scribe was not named in the orders, so it was not tasked.
     assert ctx.hive.mailbox("quill").peek() == []
 
 
@@ -263,7 +259,7 @@ def test_a_goal_sent_straight_to_the_planner_is_planned(ctx: AgentContext):
     from bioharness.core.registry import Registry as _Registry
     ada = Planner("ada", ctx)
     result = ada.handle(_msg(ctx, "human", "ada", "goal", goal="say hello to the lab"))
-    assert result["ok"] is False          # no capabilities registered in this ctx
+    assert result["ok"] is False
     assert "goal" in result and result["goal"] == "say hello to the lab"
     assert isinstance(ctx.registry, _Registry)
 
@@ -293,7 +289,6 @@ def test_a_peer_question_is_not_an_invitation_to_decline(ctx: AgentContext):
     assert "falls outside your remit" not in asked
     assert "Never open by declining" in asked
     assert "name who should take the rest" in asked
-    # Declining is still allowed when answering would mean inventing data.
     assert "inventing data you do not have" in asked
 
 

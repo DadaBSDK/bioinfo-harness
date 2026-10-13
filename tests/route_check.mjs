@@ -1,11 +1,3 @@
-/**
- * Geometry check for the lab floor: no route may ever cross a wall.
- *
- * The floor's geometry block is plain JavaScript with no DOM dependencies, so
- * it is evaluated in isolation here rather than duplicating the room table.
- * Prints JSON; exits non-zero if any sampled point along any route lands
- * inside a wall.
- */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -22,8 +14,6 @@ if (from < 0 || to < 0) {
 }
 
 const ctx = vm.createContext({ hue: () => 0, api: async () => ({}), Image: class {} });
-// `const` inside the evaluated block is lexical and never lands on the context
-// object, so the block explicitly hands back what the check needs.
 vm.runInContext(
   src.slice(from, to) +
   '\n;Object.assign(globalThis, { ROOMS, buildRoute, WT, DOOR_W, WALL_H });',
@@ -69,7 +59,6 @@ for (const A of ROOMS) {
   }
 }
 
-// Every room must be sealed apart from exactly one doorway.
 const doorless = ROOMS.filter(r => typeof r.doorX !== 'number' || !r.doorSide);
 const misplaced = ROOMS.filter(r =>
   r.doorX - DOOR_W / 2 < r.x - WT || r.doorX + DOOR_W / 2 > r.x + r.w + WT);

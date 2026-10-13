@@ -13,8 +13,8 @@ from typing import Any
 def rmsd(inputs: dict[str, Any], params: dict[str, Any],
          workdir: Path) -> dict[str, str]:
     """Backbone RMSD to frame 0, plus radius of gyration, per frame."""
-    import MDAnalysis as mda                      # noqa: PLC0415 - probed, not imported at load
-    from MDAnalysis.analysis import rms           # noqa: PLC0415
+    import MDAnalysis as mda
+    from MDAnalysis.analysis import rms
 
     topology = inputs.get("topology")
     trajectory = inputs["trajectory"]

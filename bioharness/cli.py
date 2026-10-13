@@ -59,7 +59,6 @@ def parse_kv(pairs: list[str]) -> dict[str, Any]:
     return out
 
 
-# -- commands --------------------------------------------------------------
 def cmd_caps(args: argparse.Namespace) -> int:
     reg = load_registry(args.capabilities)
     caps = reg.search(args.query) if args.query else reg.all()
@@ -109,7 +108,6 @@ def cmd_plan(args: argparse.Namespace) -> int:
         mark = color("●", "green") if ok else color("○", "yellow")
         print(f"  {i}. {mark} {cap.id} — {cap.summary}")
     if args.emit:
-        # Same wiring as the planner agent, so the two cannot diverge.
         from .agents.base import AgentContext
         from .agents.roles import Planner
         from .core.guardrails import Guardrails
@@ -174,7 +172,6 @@ def cmd_mission(args: argparse.Namespace) -> int:
                     f"agents will use deterministic fallbacks", "yellow"))
         provider = None
 
-    # Without --roles, use the hired roster with each agent's own provider.
     if args.roles:
         agents = [ROLES[name](name, ctx, provider=provider) for name in args.roles]
         names = list(args.roles)
@@ -191,8 +188,6 @@ def cmd_mission(args: argparse.Namespace) -> int:
             names.append(ident["name"])
         print(color(f"staffed from the hive: {', '.join(names)}", "dim"))
 
-    # Send the kickoff to an agent that subscribes to `goal`: the PI, else the
-    # planner.
     body = dict(goal=args.goal, start_type=args.from_type,
                 goal_type=args.to_type, domain=args.domain)
     pi = next((a for a in agents if a.role == "pi"), None)
@@ -236,7 +231,7 @@ def welcome(hive: Hive, agents: list[Any], newcomer: str, quiet: bool = False) -
     for agent in greeters:
         try:
             agent.greet(newcomer, role)
-        except Exception as exc:  # noqa: BLE001 - greeting failures are logged
+        except Exception as exc:
             hive.event("attend.error", {"agent": agent.name, "error": repr(exc)})
     hive.event("social.welcome", {"newcomer": newcomer, "role": role,
                                   "by": [a.name for a in greeters]})
@@ -258,7 +253,7 @@ def gossip(hive: Hive, agents: list[Any], rng: random.Random,
     listener = rng.choice([a for a in agents if a.name != speaker.name])
     try:
         speaker.small_talk(listener.name)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         hive.event("attend.error", {"agent": speaker.name, "error": repr(exc)})
         return
     hive.event("social.gossip", {"from": speaker.name, "to": listener.name})
@@ -287,10 +282,7 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
     agents: list[Any] = []
     key = None
     rng = random.Random(seed)
-    # Threads that already have a brief, seeded from the event log so a restart
-    # does not re-brief old orders.
     briefed = {e["payload"].get("thread") for e in hive.events("brief.written")}
-    # Agents present at startup; only later arrivals are greeted.
     known = {a["name"] for a in hive.roster()}
     last_social = time.time()
     while not (stop and stop.is_set()):
@@ -310,11 +302,10 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
             try:
                 handled += agent.tick()
             except GuardrailTripped as exc:
-                # A tripped budget stops the loop, not the process.
                 hive.event("attend.halted", {"reason": str(exc)})
                 print(color(f"  budget guardrail tripped: {exc}", "yellow"))
                 return
-            except Exception as exc:  # noqa: BLE001 - isolate agent failures
+            except Exception as exc:
                 hive.event("attend.error", {"agent": agent.name, "error": repr(exc)})
                 print(color(f"  {agent.name}: {exc}", "red"))
         hive.route()
@@ -326,11 +317,10 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
                 briefed.add(thread)
                 try:
                     write_brief(hive, thread, runs, quiet=quiet)
-                except Exception as exc:  # noqa: BLE001 - brief failures are logged
+                except Exception as exc:
                     hive.event("brief.failed", {"thread": thread, "error": repr(exc)})
                     print(color(f"  brief failed: {exc}", "red"))
 
-        # Small talk only when no mail was handled this tick.
         if social_every and not handled and time.time() - last_social >= social_every:
             gossip(hive, agents, rng, quiet=quiet)
             last_social = time.time()
@@ -347,7 +337,6 @@ def write_brief(hive: Hive, thread: str, runs: str | None,
     pdf = render(brief, out)
     hive.event("brief.written", {"thread": thread, "path": str(pdf),
                                  "verdicts": len(brief.get("verdicts", []))})
-    # Deliver to the operator's mailbox so it appears next to the order.
     hive.send("system", "human", "brief",
               {"thread": thread, "path": str(pdf),
                "order": brief.get("order", ""),
@@ -363,7 +352,6 @@ def write_brief(hive: Hive, thread: str, runs: str | None,
 def settled_orders(hive: Hive, done: set[str], settle_after: float) -> list[str]:
     """Orders whose thread has gone quiet with no mail still in flight."""
     now = time.time()
-    # Ignore the operator's mailbox; nothing consumes it.
     if any(a.get("inbox_pending") for a in hive.roster()
            if a.get("role") != "operator"):
         return []
@@ -414,7 +402,6 @@ def cmd_ui(args: argparse.Namespace) -> int:
     print(f"  runs {dash.runs}")
     print(f"  hive {dash.hive_root}")
     if args.attend:
-        # Runs the same loop as `bioharness attend`, in a background thread.
         threading.Thread(target=attend, daemon=True,
                          args=(args.hive, args.capabilities),
                          kwargs={"max_usd": args.max_usd, "quiet": True, "only": args.only,
@@ -439,7 +426,7 @@ def provider_for(identity: dict[str, Any]) -> Any:
         return None
     try:
         p = make_provider(kind, identity.get("model") or None)
-    except Exception as exc:  # noqa: BLE001 - skip bad records
+    except Exception as exc:
         print(color(f"  {identity['name']}: {exc}", "yellow"))
         return None
     if not p.available():
@@ -618,7 +605,6 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 0
 
 
-# -- parser ----------------------------------------------------------------
 def add_brief_args(c: argparse.ArgumentParser) -> None:
     """Every order the operator gives ends up as a PDF, unless they say not to."""
     c.add_argument("--brief-after", type=float, default=20.0, metavar="SECONDS",
@@ -794,7 +780,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130
-    except Exception as exc:  # noqa: BLE001 - print errors, not tracebacks
+    except Exception as exc:
         print(color(f"error: {exc}", "red"), file=sys.stderr)
         if os.environ.get("BIOHARNESS_DEBUG"):
             raise

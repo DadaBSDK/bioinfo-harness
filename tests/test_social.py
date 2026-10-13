@@ -29,7 +29,6 @@ def ctx(tmp_path: Path) -> AgentContext:
                         guardrails=Guardrails(), workdir=tmp_path / "agents")
 
 
-# -- who they are ----------------------------------------------------------
 def test_a_persona_is_stable_for_a_name():
     """The same name always produces the same persona."""
     assert persona.make("ada") == persona.make("ada")
@@ -60,11 +59,9 @@ def test_the_persona_reaches_the_prompt(ctx: AgentContext):
     iris = Curator("iris", ctx, provider=StubProvider())
     assert "Your name is iris" in iris.system_prompt
     assert iris.persona["interest"] in iris.system_prompt
-    # The job description survives alongside the personality.
     assert "data steward" in iris.system_prompt.lower()
 
 
-# -- saying hello ----------------------------------------------------------
 def test_everyone_greets_a_new_arrival(ctx: AgentContext):
     for name, role in (("iris", "curator"), ("quill", "scribe")):
         ctx.hive.enroll(name, role)
@@ -88,7 +85,6 @@ def test_a_greeting_is_answered_once(ctx: AgentContext):
     ctx.hive.route()
     back = ctx.hive.mailbox("iris").peek()
     assert [m.topic for m in back] == ["greet.reply"]
-    # A reply to a reply gets no answer.
     iris = Curator("iris", ctx, provider=StubProvider())
     iris.tick()
     ctx.hive.route()
@@ -101,7 +97,6 @@ def test_nobody_greets_themselves(ctx: AgentContext):
     assert iris.greet("iris") is None
 
 
-# -- talk about nothing ----------------------------------------------------
 def test_small_talk_peters_out(ctx: AgentContext):
     """Small talk stops after the hop limit."""
     ctx.hive.enroll("iris", "curator")
@@ -122,7 +117,7 @@ def test_small_talk_peters_out(ctx: AgentContext):
 def test_an_agent_with_no_llm_still_has_something_to_say(ctx: AgentContext):
     ctx.hive.enroll("iris", "curator")
     ctx.hive.enroll("quill", "scribe")
-    iris = Curator("iris", ctx)              # builtin: no provider at all
+    iris = Curator("iris", ctx)
     msg = iris.small_talk("quill")
     assert msg is not None and len(msg.body["line"]) > 10
     assert "quill" in msg.body["line"] or iris.persona["haunt"] in msg.body["line"] \
@@ -183,12 +178,10 @@ def test_a_newcomer_is_welcomed_by_the_running_lab(tmp_path: Path):
     assert welcomes, "nobody went over to say hello"
     assert welcomes[0]["payload"]["newcomer"] == "newbie"
     assert sorted(welcomes[0]["payload"]["by"]) == ["iris", "quill"]
-    # The newcomer replied.
     assert any(e["payload"].get("from") == "newbie"
                for e in hive.events("message.routed"))
 
 
-# -- the invented lab stays invented ---------------------------------------
 def test_gossip_never_comes_back_as_evidence(ctx: AgentContext):
     """Social notes are excluded from work recall."""
     ctx.hive.enroll("iris", "curator")
@@ -202,7 +195,6 @@ def test_gossip_never_comes_back_as_evidence(ctx: AgentContext):
     assert any("duplication" in r["text"] for r in work)
     assert not any("-80" in r["text"] for r in work), \
         "small talk surfaced as context for the work"
-    # Still stored as memory, but excluded from work recall.
     social = nova.recall("freezer", kinds=("social",))
     assert any("-80" in r["text"] for r in social)
 

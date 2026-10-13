@@ -105,5 +105,5 @@ class OllamaProvider:
             seconds=time.time() - started,
             tokens_in=int(data.get("prompt_eval_count") or 0),
             tokens_out=int(data.get("eval_count") or 0),
-            usd=0.0,          # local inference has no per-call cost
+            usd=0.0,
         )

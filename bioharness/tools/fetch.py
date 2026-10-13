@@ -53,8 +53,6 @@ def _download(url: str, dest: Path, max_lines: int = 0,
                     if max_lines and written >= max_lines:
                         break
     except EOFError:
-        # Expected when the stream is cut at max_lines; the size check below covers
-        # an empty download.
         pass
     except (urllib.error.URLError, OSError) as exc:
         if not written:
@@ -63,7 +61,6 @@ def _download(url: str, dest: Path, max_lines: int = 0,
         dest.unlink(missing_ok=True)
         raise FetchError(f"{url} gave nothing back")
     if fastq and written % 4:
-        # Drop a trailing partial FASTQ record.
         keep = written - (written % 4)
         lines = dest.read_bytes().split(b"\n")
         dest.write_bytes(b"\n".join(lines[:keep]) + b"\n")
@@ -83,13 +80,11 @@ def ena(inputs: dict[str, Any], params: dict[str, Any], workdir: Path) -> dict[s
         with _open(ENA_REPORT.format(acc=acc)) as response:
             report = response.read().decode("utf-8", "replace").splitlines()
     except FetchError as exc:
-        # ENA returns 400 for a malformed accession.
         raise FetchError(f"ENA does not recognise {acc!r} as a run accession "
                          f"(it wants SRR/ERR/DRR, not a BioProject or a sample "
                          f"id). ENA said: {str(exc)[-60:]}") from None
     if not report:
         raise FetchError(f"ENA returned an empty report for {acc!r}")
-    # Look up columns by header name; column 0 is `run_accession`, not a URL.
     header = report[0].split("\t")
     try:
         column = header.index("fastq_ftp")

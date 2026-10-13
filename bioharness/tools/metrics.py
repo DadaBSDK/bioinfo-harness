@@ -8,7 +8,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-# Patterns applied to plain-text metric files, newest tool first.
 TEXT_PATTERNS: dict[str, re.Pattern[str]] = {
     "percent_mapped": re.compile(r"([\d.]+)%\s*:?\s*(?:N/A\s*)?\)?\s*mapped", re.I),
     "total_reads": re.compile(r"^(\d+)\s*\+\s*\d+\s+in total", re.I | re.M),

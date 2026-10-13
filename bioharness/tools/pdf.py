@@ -12,12 +12,10 @@ from typing import Any
 A4 = (595.28, 841.89)
 MARGIN = 56.0
 
-# Approximate Base-14 widths, good enough for line wrapping.
 CHAR_W = {"F1": 0.50, "F2": 0.54, "F3": 0.50, "F4": 0.60}
 FONTS = {"F1": "Helvetica", "F2": "Helvetica-Bold",
          "F3": "Helvetica-Oblique", "F4": "Courier"}
 
-# Fold typographic punctuation into WinAnsi equivalents.
 FOLD = {
     "—": "-", "–": "-", "‘": "'", "’": "'",
     "“": '"', "”": '"', "…": "...", "•": "-",
@@ -49,7 +47,6 @@ class Pdf:
         self.y = self.h - MARGIN
         self._new_page()
 
-    # -- layout ------------------------------------------------------------
     def _new_page(self) -> None:
         if self.ops:
             self.pages.append(self.ops)
@@ -75,7 +72,7 @@ class Pdf:
                 else:
                     if line:
                         out.append(line)
-                    while len(word) > limit:           # a path, or a long id
+                    while len(word) > limit:
                         out.append(word[:limit - 1] + "-")
                         word = word[limit - 1:]
                     line = word
@@ -96,7 +93,6 @@ class Pdf:
             self.y -= leading
         self.y -= gap
 
-    # -- the shapes a report is made of ------------------------------------
     def heading(self, text: str) -> None:
         self._room(38)
         self.text(text, font="F2", size=17, leading=21, gap=2)
@@ -137,7 +133,6 @@ class Pdf:
     def space(self, amount: float = 8.0) -> None:
         self.y -= amount
 
-    # -- output ------------------------------------------------------------
     def save(self, path: str | Path) -> Path:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -151,12 +146,12 @@ class Pdf:
 
         def add(body: bytes) -> int:
             objects.append(body)
-            return len(objects)          # 1-based object number
+            return len(objects)
 
         font_ids = {key: add(f"<< /Type /Font /Subtype /Type1 /BaseFont /{name} "
                              f"/Encoding /WinAnsiEncoding >>".encode())
                     for key, name in FONTS.items()}
-        pages_id = len(objects) + 1 + 2 * len(pages)   # reserved below
+        pages_id = len(objects) + 1 + 2 * len(pages)
         page_ids: list[int] = []
         for ops in pages:
             stream = "\n".join(ops).encode("latin-1", "replace")

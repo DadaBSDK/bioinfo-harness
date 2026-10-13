@@ -1,17 +1,14 @@
-// Static demo backend: answers the dashboard's `api/*` requests from a recorded
-// snapshot in `data/`, and replays the recorded conversation one message at a
-// time with fresh timestamps so the lab moves as it did live. Loops forever.
 (() => {
-  const STEP = 3.2;          // seconds between replayed messages
-  const HOLD = 25;           // seconds to hold the finished session before looping
-  const WORKING_WINDOW = 25; // matches Dashboard.WORKING_WINDOW_S
+  const STEP = 3.2;
+  const HOLD = 25;
+  const WORKING_WINDOW = 25;
   const NAME_KEY = 'bioharness-demo-lab-name';
   const realFetch = window.fetch.bind(window);
 
   const base = {};
-  const local = [];          // messages sent from this browser
-  let timeline = [];         // recorded messages, oldest first
-  let events = [];           // recorded hive events, oldest first
+  const local = [];
+  let timeline = [];
+  let events = [];
   let start = Date.now() / 1000, loop = 0;
   let labName = null;
 
@@ -29,14 +26,12 @@
 
   const now = () => Date.now() / 1000;
 
-  // How far the replay has got, restarting after the hold.
   function cursor() {
     const t = now();
     if (t - start > timeline.length * STEP + HOLD) { start = t; loop += 1; }
     return Math.min(timeline.length, Math.floor((t - start) / STEP) + 1);
   }
 
-  // Replayed messages carry a per-loop id so the UI shows their bubbles again.
   function replayed() {
     const n = cursor();
     return timeline.slice(0, n).map((m, i) => ({ ...m, id: `${m.id}~${loop}`, ts: start + i * STEP }));
@@ -46,7 +41,6 @@
     return [...replayed(), ...local].sort((a, b) => a.ts - b.ts);
   }
 
-  // Recorded events are shown once the replay reaches the message they precede.
   function visibleEvents() {
     const n = cursor();
     if (!n) return [];
@@ -124,7 +118,7 @@
       const name = String(payload.name || '').trim().replace(/\s+/g, ' ');
       if (!name || name.length > 60) return json({ ok: false, error: 'lab name must be 1-60 characters' }, 400);
       labName = name;
-      try { localStorage.setItem(NAME_KEY, name); } catch { /* private mode */ }
+      try { localStorage.setItem(NAME_KEY, name); } catch { }
       return json({ ok: true, name });
     }
     if (path === 'message') {
@@ -153,13 +147,12 @@
     await loaded;
     if ((options.method || 'GET').toUpperCase() === 'POST') {
       let payload = {};
-      try { payload = JSON.parse(options.body || '{}'); } catch { /* empty body */ }
+      try { payload = JSON.parse(options.body || '{}'); } catch { }
       return post(url.pathname.replace(/^.*?\/?api\//, ''), payload);
     }
     return get(url);
   };
 
-  // Brief links point at the server's PDF endpoint; serve the recorded PDF.
   document.addEventListener('click', e => {
     const a = e.target.closest('a[href^="api/brief/"]');
     if (!a) return;

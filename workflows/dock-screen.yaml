@@ -2,15 +2,15 @@ name: dock-screen
 description: Dock a ligand library against one receptor, one task per ligand.
 
 params:
-  receptor: null                 # --set receptor=/data/receptor.pdbqt
-  ligands: []                    # --set ligands='["a.pdbqt","b.pdbqt"]'
+  receptor: null
+  ligands: []
   center: {x: 0, y: 0, z: 0}
   exhaustiveness: 16
 
 steps:
   - id: dock
     capability: vina_dock
-    scatter: ligand              # fans out into one task per ligand
+    scatter: ligand
     with:
       receptor: "{{ params.receptor }}"
       ligand: "{{ params.ligands }}"

@@ -24,9 +24,6 @@ from ..core.workspace import Workspace
 from .base import Agent, ProviderUnavailable
 
 
-# --------------------------------------------------------------------------
-# Type-graph planning (no LLM required).
-# --------------------------------------------------------------------------
 def plan_by_types(registry: Registry, start_type: str, goal_type: str,
                   domain: str | None = None, max_depth: int = 8) -> list[str]:
     """Shortest chain of capabilities carrying `start_type` to `goal_type`.
@@ -70,8 +67,6 @@ def source_for(registry: Registry, data_type: str,
     return None
 
 
-# key=value parameters in an order, e.g. `accession=SRR000001`. Quoted values
-# may contain spaces.
 ORDER_PARAM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]+\"|'[^']+'|\S+)")
 
 
@@ -92,7 +87,7 @@ def repair_plan(registry: Registry, wf: dict[str, Any]) -> dict[str, Any]:
     for step in wf.get("steps", []) or []:
         try:
             cap = registry.get(step.get("capability", ""))
-        except Exception:  # noqa: BLE001 - unknown capability, handled later
+        except Exception:
             continue
         ports = {port.name for port in cap.inputs}
         declared = set(cap.params or {})
@@ -115,7 +110,7 @@ def file_params(registry: Registry, wf: dict[str, Any]) -> set[str]:
     for step in wf.get("steps", []) or []:
         try:
             cap = registry.get(step.get("capability", ""))
-        except Exception:  # noqa: BLE001
+        except Exception:
             continue
         ports = {port.name for port in cap.inputs}
         for name, binding in (step.get("with") or {}).items():
@@ -124,7 +119,6 @@ def file_params(registry: Registry, wf: dict[str, Any]) -> set[str]:
     return out
 
 
-# Words in a goal meaning the input data must be downloaded first.
 FETCH_WORDS = ("fetch", "download", "pull", "retrieve", "accession", "online",
                "from ena", "from sra", "public")
 
@@ -136,7 +130,6 @@ class Planner(Agent):
     invent a capability that is not in the catalogue."""
 
     role = "planner"
-    # Also accept `goal`, so a human can message the planner directly.
     subscribes = ("plan.request", "goal")
     default_autonomy = Autonomy.SUGGEST
 
@@ -150,7 +143,6 @@ class Planner(Agent):
         if start_type and goal_type:
             chain = plan_by_types(self.ctx.registry, start_type, goal_type, domain)
             if chain:
-                # A fetch request must start the chain with a fetch capability.
                 if any(word in goal.lower() for word in FETCH_WORDS):
                     src = source_for(self.ctx.registry, start_type, domain)
                     if src and src not in chain:
@@ -172,7 +164,6 @@ class Planner(Agent):
                       + " -> ".join(s["capability"] for s in wf["steps"]),
                       heading=f"plan {wf['name']}")
 
-        # Ask the curator to check the plan's inputs before it is queued.
         chain = " -> ".join(s["capability"] for s in wf["steps"])
         self.ask_peer("curator",
                       f"I plan to run: {chain}. Which of these inputs would you "
@@ -206,8 +197,6 @@ class Planner(Agent):
                     binding[port.name] = f"{{{{ params.{port.name} }}}}"
                     params.setdefault(port.name, None)
 
-            # Parameters with no usable default (accession, URL) become workflow
-            # parameters so the operator is asked for them.
             step_params: dict[str, Any] = {}
             for name, default in (cap.params or {}).items():
                 if default in ("", None):
@@ -248,11 +237,10 @@ class Planner(Agent):
                 continue
             cap = step.get("capability")
             if cap not in self.ctx.registry:
-                continue                       # invented tool
+                continue
             sid = str(step.get("id") or f"step{i + 1}")
             if sid in seen:
                 sid = f"{sid}_{i}"
-            # Keep only dependencies on steps already accepted.
             needs = [n for n in (step.get("needs") or []) if n in seen]
             cleaned.append({"id": sid, "capability": cap,
                             "with": step.get("with") or {},
@@ -269,7 +257,7 @@ class Planner(Agent):
               "params": raw.get("params") or {}, "steps": cleaned}
         try:
             topo_sort(workflow_from_dict(wf))
-        except Exception:  # noqa: BLE001 - unusable plan
+        except Exception:
             return None
         return wf
 
@@ -282,7 +270,6 @@ class Planner(Agent):
             if not domain or c.domain in (domain, "general"))
         schema = ('{"name": str, "description": str, "steps": '
                   '[{"id": str, "capability": str, "with": {port: value}, "needs": [str]}]}')
-        # JSON schema for the plan; enforced where the provider supports it.
         wf_schema = {
             "type": "object",
             "required": ["name", "steps"],
@@ -348,7 +335,7 @@ class Curator(Agent):
         for name, value in bindings.items():
             for item in (value if isinstance(value, list) else [value]):
                 if not isinstance(item, (str, Path)) or "{{" in str(item):
-                    continue  # unresolved template, bound by the orchestrator
+                    continue
                 path = Path(str(item)).expanduser()
                 if not path.exists():
                     problems.append(f"{name}: missing path {path}")
@@ -380,7 +367,6 @@ class Validator(Agent):
     subscribes = ("qc.check",)
     default_autonomy = Autonomy.BOUNDED
 
-    # (metric, comparison, default threshold); overridable per message.
     GATES: dict[str, tuple[str, float]] = {
         "mean_quality": (">=", 28.0),
         "percent_duplicates": ("<=", 30.0),
@@ -406,7 +392,6 @@ class Validator(Agent):
         self.publish("qc/last", {"verdict": verdict, "failures": failures,
                                  "passes": passes, "step": msg.body.get("step")})
         if failures:
-            # Gate failures are sent to the analyst for interpretation.
             self.ask_peer("analyst",
                           "These QC gates failed. Which technical artefact most "
                           "likely explains them, and is it worth a rerun?",
@@ -437,7 +422,6 @@ class Analyst(Agent):
                 context=json.dumps({"metrics": metrics, "artifacts": digest},
                                    indent=2, default=str)[:12000])
         except ProviderUnavailable as exc:
-            # Without an LLM, fall back to a metrics-only analysis.
             return {"ok": True, "mode": "descriptive", "provider_error": str(exc),
                     "summary": _descriptive_summary(artifacts, metrics), "digest": digest}
         self.remember(text[:2000], heading=f"analysis {msg.body.get('run_id', '')}")
@@ -469,7 +453,7 @@ class Scribe(Agent):
         for t in tasks:
             try:
                 cap = self.ctx.registry.get(t.get("capability", ""))
-            except Exception:  # noqa: BLE001 - stale capability
+            except Exception:
                 continue
             params = ", ".join(f"{k}={v}" for k, v in sorted((t.get("params") or {}).items()))
             lines.append(
@@ -490,8 +474,6 @@ class Runner(Agent):
 
     role = "runner"
     subscribes = ("run.request",)
-    # Runners start bounded: they need an explicit scope or full autonomy to
-    # execute.
     default_autonomy = Autonomy.BOUNDED
 
     def _demanded_params(self, raw: dict[str, Any]) -> set[str]:
@@ -503,7 +485,7 @@ class Runner(Agent):
         for step in raw.get("steps", []) or []:
             try:
                 cap = self.ctx.registry.get(step.get("capability", ""))
-            except Exception:  # noqa: BLE001 - unknown capability, handled later
+            except Exception:
                 continue
             given = set(step.get("params", {}) or {})
             for name, default in (cap.params or {}).items():
@@ -518,13 +500,11 @@ class Runner(Agent):
 
         wf = workflow_from_dict(raw)
         params = {**(raw.get("params") or {}), **(msg.body.get("params") or {})}
-        # Missing = declared-but-empty, plus parameters referenced by steps but never
-        # declared. Workflow-level parameters apply to every step that declares them.
         steps = raw.get("steps", []) or []
         for step in steps:
             try:
                 cap = self.ctx.registry.get(step.get("capability", ""))
-            except Exception:  # noqa: BLE001
+            except Exception:
                 continue
             for name in (cap.params or {}):
                 if name in params and params[name] not in (None, ""):
@@ -536,7 +516,6 @@ class Runner(Agent):
             | (_referenced_params(raw) - supplied)
             | (self._demanded_params(raw) - supplied))
         if unbound:
-            # Refuse to run with missing parameters.
             self.publish(f"run/blocked/{wf.name}",
                          {"reason": "unbound parameters", "needs": unbound})
             return {"ok": False, "reason": "unbound parameters", "needs": unbound,
@@ -570,13 +549,11 @@ class PI(Agent):
                   "run.request.result")
     default_autonomy = Autonomy.BOUNDED
 
-    # Work topic for each role. The PI may only dispatch these topics.
     DISPATCH_TOPICS = {
         "planner": "plan.request", "curator": "data.validate",
         "validator": "qc.check", "analyst": "analyze", "scribe": "report",
         "runner": "run.request",
     }
-    # Inputs each role needs before its work topic can be sent.
     DISPATCH_NEEDS = {"curator": "inputs", "validator": "metrics",
                       "analyst": "artifacts", "scribe": "tasks",
                       "runner": "workflow"}
@@ -624,7 +601,6 @@ class PI(Agent):
 
     def _dispatch(self, goal: str, body: dict[str, Any], asked_by: str,
                   ask_idle: bool = True) -> dict[str, Any]:
-        # key=value pairs in the order become mission parameters.
         given = {**params_in(goal), **(body.get("params") or {})}
         if given:
             body = {**body, "params": given}
@@ -651,10 +627,8 @@ class PI(Agent):
             who = staffed[role]
             topic = self._task_for(role, msg.body)
             if topic == self.PEER_ASK and not ask_idle:
-                # Nothing to do and already replied: stay silent.
                 continue
             if topic == self.PEER_ASK:
-                # No inputs yet: ask for an opinion instead of dispatching work.
                 self.ask_peer(who, instruction, goal=goal,
                               domain=msg.body.get("domain"))
             else:
@@ -738,7 +712,6 @@ class PI(Agent):
         self.publish("mission/plan", {"workflow": wf.get("name"),
                                       "steps": [s.get("capability") for s in steps]})
 
-        # Missing parameters: ask the operator.
         given = self.hive.blackboard.get("mission/params") or {}
         if given:
             wf["params"] = {**(wf.get("params") or {}), **given}
@@ -752,17 +725,14 @@ class PI(Agent):
         self.remember("Plan accepted: "
                       + " -> ".join(s.get("capability", "?") for s in steps),
                       heading=f"plan {wf.get('name', '')}")
-        # The scribe drafts Methods from the plan; the ledger fills in details later.
         scribe = self.hive.whois("scribe")
         if scribe:
             self.send(scribe, "report", tasks=steps, run_id=wf.get("name", ""),
                       instruction="Draft Methods for the planned pipeline.")
 
-        # The curator validates inputs before the run is dispatched.
         self.publish("mission/workflow", wf)
         curator = self.hive.whois("curator")
         if curator:
-            # Only parameters bound to input ports are file paths.
             files = file_params(self.ctx.registry, wf)
             self.send(curator, "data.validate",
                       inputs={k: v for k, v in (wf.get("params") or {}).items()

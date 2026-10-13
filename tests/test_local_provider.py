@@ -25,14 +25,13 @@ from bioharness.core.registry import Registry
 ROOT = Path(__file__).resolve().parents[1]
 
 
-# -- provider --------------------------------------------------------------
 def test_host_normalisation():
     assert _host("127.0.0.1:11434") == "http://127.0.0.1:11434"
     assert _host("http://box:11434/") == "http://box:11434"
 
 
 def test_unreachable_server_is_reported_not_raised():
-    p = OllamaProvider(host="http://127.0.0.1:1")     # nothing listens here
+    p = OllamaProvider(host="http://127.0.0.1:1")
     assert not p.available()
     assert "no Ollama server" in p.unavailable_reason()
 
@@ -73,7 +72,6 @@ def test_installed_models_is_empty_when_nothing_answers():
     assert installed_models("http://127.0.0.1:1", timeout=1.0) == []
 
 
-# -- truncated JSON --------------------------------------------------------
 def test_repairs_a_reply_cut_one_brace_short():
     truncated = ('{"name": "W", "steps": [{"id": "s1", "capability": "fastp", '
                  '"needs": []}, {"id": "s2", "capability": "bwa_mem", "needs": ["s1"]}]')
@@ -105,7 +103,6 @@ def test_repair_returns_none_when_there_is_no_json():
     assert repair_truncated_json("nothing here") is None
 
 
-# -- plan validation -------------------------------------------------------
 @pytest.fixture
 def planner(tmp_path: Path) -> Planner:
     ctx = AgentContext(hive=Hive(tmp_path / "hive"),

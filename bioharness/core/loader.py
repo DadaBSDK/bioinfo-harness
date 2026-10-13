@@ -9,7 +9,7 @@ from .schemas import Step, Workflow
 
 try:
     import yaml
-except ImportError:  # pragma: no cover
+except ImportError:
     yaml = None
 
 

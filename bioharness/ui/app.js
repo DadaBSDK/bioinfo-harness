@@ -19,7 +19,6 @@ const state = {
   chat: [], chatSeen: 0, briefs: [],
   log: null, logTab: 'stderr', sent: '', sending: false,
   staffOptions: null, hireMsg: '', hiring: false,
-  // Kept in state so a repaint does not clear a half-filled form.
   hireForm: { name: '', role: '', provider: 'builtin', model: '', autonomy: 'bounded' },
 };
 
@@ -32,7 +31,6 @@ const pill = s => `<span class="pill s-${esc(s)}">${esc(s)}</span>`;
 const chip = s => `<span class="chip c-${esc(s)}">${esc(s)}</span>`;
 const clock = ts => ts ? new Date(ts * 1000).toLocaleTimeString() : '';
 const initials = n => String(n || '?').slice(0, 2).toUpperCase();
-// Stable colour per agent name.
 const hue = n => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const avatarFill = n => `hsl(${hue(n)} 42% 45%)`;
 const STATUS_COLOR = { working: 'var(--run)', awaiting: 'var(--accent)',
@@ -47,19 +45,14 @@ async function api(path, options) {
   return r.json();
 }
 
-// ==========================================================================
-// 2D lab floor: pixel art on a canvas, labels on an SVG layer above it
-// ==========================================================================
 const TILE = 32;
 const FW = 1152, FH = 672;
 const SCALE = 1.5;
 
-const WALL_H = 60;      // height of a room's back wall band
-const WT = 12;          // thickness of side and front walls
-const DOOR_W = 48;      // clear width of a doorway
+const WALL_H = 60;
+const WT = 12;
+const DOOR_W = 48;
 
-// Corridors: two horizontal lanes that every door opens onto, joined by the
-// gaps between room columns.
 const LANE_TOP = 266, LANE_BOTTOM = 534;
 const CONNECTORS = [380, 768];
 const WALK_SPEED = 78;
@@ -81,14 +74,6 @@ async function loadAtlas() {
   }
 }
 
-// x/y/w/h is the room's interior floor; walls are built around it, and
-// `doorX` is the centre of its single doorway. Furniture mirrors the instrument
-// list in `agents/lab.py`.
-//
-//   wall        equipment along the back wall
-//   counter     a work surface across the room
-//   mid         [sprite, fx, fy] free-standing, mid-floor
-//   floorProps  [sprite, fx, fy] near the door
 const ROOMS = [
   { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 340, h: 156,
     tile: 'floor_wood', counter: true, doorSide: 'bottom', doorX: 186,
@@ -128,7 +113,6 @@ const ROOMS = [
     wall: ['desk_pc', 'whiteboard', 'shelving', 'printer', 'clock'],
     floorProps: [['filing_cabinet', 0.07, 0.64], ['plant', 0.94, 0.64]] },
 
-  // The lobby's door is in its top wall, onto the lower corridor.
   { id: 'lobby', label: 'WAITING LOBBY', x: 16, y: 568, w: 1116, h: 80,
     tile: 'floor_wood', backWall: false, doorSide: 'top', doorX: 574,
     roles: ['operator'], accent: '#9a968e', wall: [],
@@ -155,7 +139,6 @@ const spriteFor = a => ROLE_SPRITE[a.role] || SPRITE_POOL[hue(a.name) % SPRITE_P
 
 function roomById(id) { return ROOMS.find(r => r.id === id); }
 
-// Interior only: a point inside a wall belongs to no room.
 function roomAt(x, y) {
   return ROOMS.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
 }
@@ -180,12 +163,10 @@ function seat(agents) {
   return placed;
 }
 
-// -- doors and routing -----------------------------------------------------
 const laneFor = room => (TOP_ROOMS.includes(room.id) ? LANE_TOP : LANE_BOTTOM);
 const nearestLane = y => (Math.abs(y - LANE_TOP) < Math.abs(y - LANE_BOTTOM)
                           ? LANE_TOP : LANE_BOTTOM);
 
-/** The two points either side of a room's doorway. */
 function doorPoints(room) {
   const x = room.doorX;
   return room.doorSide === 'top'
@@ -194,17 +175,12 @@ function doorPoints(room) {
         outside: { x, y: room.y + room.h + WT + 16 } };
 }
 
-/** Clamp a destination to a walkable point. */
 function sanitizeTarget(x, y) {
   const r = roomAt(x, y);
   if (r) return { x, y };
   return { x: Math.max(20, Math.min(FW - 20, x)), y: nearestLane(y) };
 }
 
-/**
- * Route between two points through doors and corridors only: to the door,
- * along a corridor lane, then in through the target room's door.
- */
 function buildRoute(fx, fy, tx, ty) {
   const A = roomAt(fx, fy), B = roomAt(tx, ty);
   if (A && A === B) return [{ x: tx, y: ty }];
@@ -237,15 +213,12 @@ function buildRoute(fx, fy, tx, ty) {
   return pts;
 }
 
-// -- speech bubbles --------------------------------------------------------
-// Speech bubbles: shown over the speaker for a few seconds.
 const BUBBLE_MS = 8000;
-const BUBBLE_COLS = 34;        // characters per line
-const BUBBLE_LINES = 3;        // max lines, then truncated
-const BUBBLE_CH = 5.6;         // width of one character at 10px
+const BUBBLE_COLS = 34;
+const BUBBLE_LINES = 3;
+const BUBBLE_CH = 5.6;
 const BUBBLE_LH = 13;
 
-// Bubbles are plain text, so markdown markers are stripped.
 const demark = t => String(t || '').replace(/\*\*|__|`/g, '').replace(/^#+\s*/gm, '');
 
 function wrapLines(text, cols = BUBBLE_COLS, max = BUBBLE_LINES) {
@@ -265,7 +238,6 @@ function wrapLines(text, cols = BUBBLE_COLS, max = BUBBLE_LINES) {
   return lines;
 }
 
-// -- the world -------------------------------------------------------------
 const WORLD = { actors: Object.create(null), seen: new Set(), raf: 0, last: 0, hover: null };
 
 function syncWorld() {
@@ -288,35 +260,31 @@ function syncWorld() {
   if (state.agent && !pos[state.agent]) state.agent = null;
   if (WORLD.seen.size > 2000) WORLD.seen = new Set([...WORLD.seen].slice(-1000));
 
-  // A routed message becomes an errand: the sender walks to the recipient's
-  // current position, pauses, then returns to their station.
   const now = Date.now() / 1000;
   const TALKING_DISTANCE = 74;
   for (const t of state.floor?.traffic || []) {
     const key = `${t.from}>${t.to}@${t.ts}`;
     if (WORLD.seen.has(key)) continue;
     WORLD.seen.add(key);
-    if (now - t.ts > 45) continue;            // skip messages older than 45 s
+    if (now - t.ts > 45) continue;
     const from = WORLD.actors[t.from], to = WORLD.actors[t.to];
     if (!from || !to || t.from === t.to) continue;
 
-    // Keep the recipient in place until the sender arrives.
     to.wait = Math.max(to.wait, 2.4);
     if (Math.hypot(to.x - from.x, to.y - from.y) < TALKING_DISTANCE) {
-      from.path = [];                        // already together
+      from.path = [];
       from.errand = { to: t.to, topic: t.topic };
       from.wait = Math.max(from.wait, 1.8);
       from.facing = to.x < from.x ? -1 : 1;
       continue;
     }
-    const side = to.x > FW / 2 ? -34 : 34;   // stand beside the recipient
+    const side = to.x > FW / 2 ? -34 : 34;
     const spot = sanitizeTarget(to.x + side, to.y);
     from.path = buildRoute(from.x, from.y, spot.x, spot.y);
     from.errand = { to: t.to, topic: t.topic };
     from.wait = 1.8;
   }
 
-  // Show recent utterances as bubbles; skip old ones on first load.
   for (const c of state.floor?.chatter || []) {
     const key = `say:${c.id}`;
     if (WORLD.seen.has(key)) continue;
@@ -353,7 +321,7 @@ function stepWorld(dt) {
       act.errand = null;
       const h = act.home;
       if (h && Math.hypot(h.x - act.x, h.y - act.y) > 4) {
-        act.path = buildRoute(act.x, act.y, h.x, h.y);   // wander back to station
+        act.path = buildRoute(act.x, act.y, h.x, h.y);
       }
     }
   }
@@ -362,7 +330,6 @@ function stepWorld(dt) {
 const atHome = act => act.home && !act.moving && act.wait <= 0 &&
                       Math.hypot(act.home.x - act.x, act.home.y - act.y) < 5;
 
-// -- drawing ---------------------------------------------------------------
 function frame(name) { return ATLAS.frames?.[name]; }
 
 function shadow(ctx, cx, y, w) {
@@ -407,7 +374,6 @@ function tileRect(ctx, name, x, y, w, h) {
   ctx.restore();
 }
 
-/** A solid wall segment. */
 function wallRect(ctx, x, y, w, h) {
   if (w <= 0 || h <= 0) return;
   ctx.fillStyle = WALL_EDGE;
@@ -416,8 +382,6 @@ function wallRect(ctx, x, y, w, h) {
   ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
 }
 
-/** The room enclosure: back band, side walls, and a front wall with an
- *  unpainted doorway gap. */
 function drawShell(ctx, room) {
   const { x, y, w, h } = room;
   const ox = x - WT, ow = w + WT * 2;
@@ -436,7 +400,6 @@ function drawShell(ctx, room) {
     }
   }
 
-  // Side walls run full height into the front wall.
   wallRect(ctx, ox, y, WT, h + WT);
   wallRect(ctx, x + w, y, WT, h + WT);
 
@@ -453,16 +416,14 @@ function drawShell(ctx, room) {
     wallRect(ctx, ox, y + h, ow, WT);
   }
 
-  // Door jambs.
   ctx.fillStyle = WALL_EDGE;
   ctx.fillRect(gap0 - 2, frontY, 3, WT);
   ctx.fillRect(gap1 - 1, frontY, 3, WT);
   ctx.fillStyle = 'rgba(0,0,0,0.25)';
-  ctx.fillRect(gap0 + 1, frontY, DOOR_W - 2, 3);   // threshold shadow
+  ctx.fillRect(gap0 + 1, frontY, DOOR_W - 2, 3);
 }
 
 function drawCounter(ctx, room) {
-  // Use only the straight middle tile; the end caps are corner pieces.
   const m = frame('counter_m');
   if (!m) return;
   const sc = 1.15;
@@ -478,7 +439,6 @@ function drawCounter(ctx, room) {
   ctx.restore();
 }
 
-/** Corridor floor: two horizontal lanes joined by two vertical ones. */
 function drawCorridors(ctx) {
   const LANE_W = 46;
   const lanes = [
@@ -487,13 +447,11 @@ function drawCorridors(ctx) {
     ...CONNECTORS.map(x => [x - LANE_W / 2, LANE_TOP, LANE_W, LANE_BOTTOM - LANE_TOP]),
   ];
   ctx.save();
-  // Tiled, lighter and edged, to separate corridors from rooms and slab.
   for (const [x, y, w, h] of lanes) {
     tileRect(ctx, 'floor_tile', x, y, w, h);
     ctx.fillStyle = 'rgba(20,26,30,0.34)';
     ctx.fillRect(x, y, w, h);
   }
-  // Worn centre line down each lane.
   ctx.strokeStyle = 'rgba(255,252,240,0.06)';
   ctx.lineWidth = 12;
   ctx.beginPath();
@@ -501,7 +459,6 @@ function drawCorridors(ctx) {
   ctx.moveTo(0, LANE_BOTTOM); ctx.lineTo(FW, LANE_BOTTOM);
   for (const x of CONNECTORS) { ctx.moveTo(x, LANE_TOP); ctx.lineTo(x, LANE_BOTTOM); }
   ctx.stroke();
-  // Edge lines where a lane meets open slab.
   ctx.strokeStyle = 'rgba(0,0,0,0.45)';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -513,7 +470,6 @@ function drawCorridors(ctx) {
   ctx.restore();
 }
 
-/** Skirting board and wall shadow along the back wall. */
 function drawWallFoot(ctx, room) {
   if (room.backWall === false) return;
   const f = frame('wall_skirting');
@@ -534,7 +490,6 @@ function drawWallFoot(ctx, room) {
   ctx.fillRect(room.x, room.y, room.w, 34);
 }
 
-/** Room lighting pool and a doormat at the doorway. */
 function drawRoomLight(ctx, room) {
   const cx = room.x + room.w / 2, cy = room.y + room.h * 0.45;
   const g = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(room.w, room.h) * 0.62);
@@ -554,10 +509,8 @@ function drawThreshold(ctx, room) {
   ctx.restore();
 }
 
-/** Name plate on the wall band; the text itself is drawn in the SVG layer. */
 function drawSign(ctx, room) {
   const w = room.label.length * 6.6 + 26, h = 20;
-  // Rooms without a wall band show the sign inside, on the right.
   const inside = room.backWall === false;
   const x = inside ? room.x + room.w - w - 6 : room.x + 4;
   const y = inside ? room.y + 2 : room.y - WALL_H + 2;
@@ -592,7 +545,6 @@ function paintCanvas() {
   const staffed = new Set(actors.map(a => a.home?.room));
 
   for (const room of ROOMS) {
-    // Unstaffed rooms are drawn darker and cooler.
     const lit = staffed.has(room.id);
     ctx.globalAlpha = lit ? 1 : 0.66;
     if (room.tile) {
@@ -624,7 +576,6 @@ function paintCanvas() {
     ctx.globalAlpha = 1;
   }
 
-  // Highlight the hovered room and the selected agent's room.
   const focusRoom = WORLD.hover ? WORLD.actors[WORLD.hover]?.home?.room
                                 : WORLD.actors[state.agent]?.home?.room;
   const fr = focusRoom && roomById(focusRoom);
@@ -651,7 +602,6 @@ function paintCanvas() {
     }
   });
 
-  // Vignette over everything.
   const v = ctx.createRadialGradient(FW / 2, FH / 2, FH * 0.34,
                                      FW / 2, FH / 2, FH * 0.92);
   v.addColorStop(0, 'rgba(0,0,0,0)');
@@ -662,13 +612,10 @@ function paintCanvas() {
 
 const CHAR_H = 34 * SCALE;
 
-// -- overlay ---------------------------------------------------------------
-// Built once per roster change, then moved each frame with transforms.
 function floorOverlay() {
   const f = state.floor;
   if (!f) return '';
 
-  // Room names go on the wall band, or inside the front wall for the lobby.
   const labels = ROOMS.map(r => (r.backWall === false
     ? `<text class="room-label" text-anchor="end" x="${r.x + r.w - 12}"
              y="${r.y + 17}">${esc(r.label)}</text>`
@@ -712,7 +659,6 @@ function paintOverlay() {
 
   paintBubbles(svg);
 
-  // Wires are redrawn each frame because their endpoints move.
   const wires = svg.querySelector('.wires');
   if (!wires) return;
   const now = Date.now() / 1000;
@@ -727,13 +673,11 @@ function paintOverlay() {
     }).join('');
 }
 
-// Bubbles live in the SVG layer so they share the labels' viewBox mapping.
 function paintBubbles(svg) {
   const layer = svg.querySelector('.bubbles');
   if (!layer) return;
   const now = performance.now();
   const parts = [];
-  // Lift any bubble that would overlap one already placed.
   const placed = [];
   const speakers = Object.values(WORLD.actors)
     .filter(a => a.bubble && a.bubble.until >= now)
@@ -771,7 +715,6 @@ function paintBubbles(svg) {
   layer.innerHTML = parts.join('');
 }
 
-// Operator-chosen lab name; defaults to Voxel Lab.
 function labName() {
   return state.floor?.lab_name || 'Voxel Lab';
 }
@@ -836,7 +779,6 @@ function renderFloor() {
   </div>`;
 }
 
-// -- the loop --------------------------------------------------------------
 function tickWorld(ts) {
   WORLD.raf = requestAnimationFrame(tickWorld);
   const dt = Math.min(0.05, (ts - WORLD.last) / 1000 || 0);
@@ -853,7 +795,6 @@ function startWorld() {
   if (!WORLD.raf) WORLD.raf = requestAnimationFrame(tickWorld);
 }
 
-// -- pointer ---------------------------------------------------------------
 function svgPoint(evt, svg) {
   const pt = svg.createSVGPoint();
   pt.x = evt.clientX;
@@ -865,11 +806,10 @@ function svgPoint(evt, svg) {
 function walkTo(name, x, y) {
   const act = WORLD.actors[name];
   if (!act) return;
-  // Snap the destination to the nearest walkable point.
   const t = sanitizeTarget(Math.max(12, Math.min(FW - 12, x)),
                            Math.max(40, Math.min(FH - 8, y)));
   act.path = buildRoute(act.x, act.y, t.x, t.y);
-  act.wait = 2.5;          // seconds to wait before returning to station
+  act.wait = 2.5;
   act.errand = null;
 }
 
@@ -885,9 +825,6 @@ document.addEventListener('mousemove', e => {
   }
   WORLD.hover = best;
 });
-// ==========================================================================
-// Command center
-// ==========================================================================
 function ccActivity() {
   const events = (state.floor?.activity || []).slice(0, 50);
   if (!events.length) return '<div class="empty">Your lab is ready.<br>Activity will appear here as the team works.</div>';
@@ -1025,12 +962,9 @@ function ccBody() {
            graph: ccGraph }[state.cc]();
 }
 
-// `directive` first: the most common topic, and every agent must answer it.
 const TOPICS = ['directive', 'goal', 'peer.ask', 'smalltalk', 'greet',
                 'plan.request', 'data.validate', 'qc.check', 'analyze', 'report'];
 
-// Built once per tab switch; live parts are updated in place so the message
-// box keeps focus.
 function floorScaffold() {
   return `<div class="floorwrap">
     <div class="stage">
@@ -1108,8 +1042,6 @@ function paintFloor() {
   $('#cc-sub').innerHTML = head.sub;
   updateHTML($('#cc-tabs'), CC_TABS.map(t =>
     `<button data-cc="${t}" aria-pressed="${state.cc === t}" class="${state.cc === t ? 'on' : ''}">${PANEL_NAMES[t]}</button>`).join(''));
-  // Build the stage once, then update only the canvas and overlay. The overlay
-  // is rebuilt only when the roster changes.
   const overlay = $('.flooroverlay');
   const roster = (state.floor?.agents || []).map(a => a.name).join(',');
   const stage = $('#stage');
@@ -1126,12 +1058,9 @@ function paintFloor() {
   paintOverlay();
   updateHTML($('#strip'), workerStripInner());
 
-  // Skip repainting while a field inside is focused.
   const body = $('#cc-body');
   if (!(body.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'))) updateHTML(body, ccBody());
 
-  // Rebuild the recipient list only when the roster changes, so an open
-  // dropdown is not reset.
   const names = (state.floor?.agents || []).map(a => a.name);
   const sel = $('#qto');
   if (sel && sel.dataset.names !== names.join(',')) {
@@ -1163,9 +1092,6 @@ function workerStripInner() {
     </button>`).join('') || '<div class="empty">Your team will appear here. Use Manage team to get started.</div>';
 }
 
-// ==========================================================================
-// DAG (shared by the runs view and the command center)
-// ==========================================================================
 function layout(graph) {
   const byId = Object.fromEntries(graph.map(s => [s.id, s]));
   const depth = {};
@@ -1228,9 +1154,6 @@ function renderDag(graph, tasks, compact = false) {
     viewBox="0 0 ${width} ${height}">${edges}${nodes}</svg></div>`;
 }
 
-// ==========================================================================
-// Conversation -- the roster's messages read back as an exchange
-// ==========================================================================
 const TOPIC_LABEL = {
   'peer.ask': 'asks', 'peer.reply': 'answers', 'goal': 'mission',
   'plan.request': 'plan?', 'data.validate': 'check inputs',
@@ -1239,11 +1162,8 @@ const TOPIC_LABEL = {
   'run.request': 'run it', 'run.request.result': 'ran it',
   'directive': 'ORDER', 'verdict': 'verdict', 'brief': 'brief',
 };
-// Small-talk topics get their own styling.
 const SOCIAL_TOPICS = ['greet', 'greet.reply', 'smalltalk'];
 
-// Escape HTML first, then render **bold** and `code`. Reversing the order
-// would allow HTML injection.
 function richSay(text) {
   return esc(text)
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
@@ -1402,9 +1322,6 @@ function viewCost() {
     </div>`;
 }
 
-// ==========================================================================
-// Shell
-// ==========================================================================
 function sidebar() {
   const runs = state.runs.map(r => `
     <div class="run-item ${r.run_id === state.runId ? 'on' : ''}" data-run="${esc(r.run_id)}">
@@ -1443,14 +1360,11 @@ function render() {
     return paintFloor();
   }
 
-  // Skip repainting while a field is focused.
   const shell = $('#shell');
   if (shell.contains(document.activeElement) &&
       /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
   const view = { chat: viewChat, runs: viewRuns, hive: viewHive,
                  caps: viewCaps, cost: viewCost }[state.tab];
-  // Preserve the transcript's scroll position across rebuilds; follow new
-  // messages only if already at the bottom.
   const before = $('#chatlog');
   const stick = !before ||
     before.scrollHeight - before.scrollTop - before.clientHeight < 60;
@@ -1511,7 +1425,6 @@ async function loadLog(step) {
   render();
 }
 
-/** Copy the hire form fields into state. */
 function syncHireForm() {
   const f = state.hireForm;
   const get = id => $(`#${id}`)?.value;
@@ -1536,7 +1449,6 @@ async function hireAgent() {
   state.hireMsg = r.ok ? `hired ${r.agent.name} as ${r.agent.role}` : `refused: ${r.error}`;
   if (r.ok) state.hireForm.name = '';
   await refresh();
-  // The roster changed, so re-render the panel even though it has focus.
   const b = $('#cc-body'); if (b) { b.dataset.rendered = ''; b.innerHTML = ccBody(); }
 }
 
@@ -1562,7 +1474,6 @@ async function sendMessage() {
   const to = $('#qto')?.value, topic = $('#qtopic')?.value || 'goal';
   state.draft = originalDraft; state.recipient = to; state.topic = topic;
   state.sending = true; render();
-  // Each topic expects a different body field.
   const body = topic === 'directive' ? { order: text }
     : topic === 'goal' ? { goal: text }
     : topic === 'peer.ask' ? { question: text, hops: 0 }
@@ -1609,8 +1520,6 @@ document.addEventListener('click', e => {
     const svg = e.target.ownerSVGElement;
     const p = svg && svgPoint(e, svg);
     if (!p) return;
-    // With an agent selected, a click sends them there; otherwise it clears the
-    // selection.
     if (state.agent && WORLD.actors[state.agent]) return walkTo(state.agent, p.x, p.y);
     state.agent = null;
     return render();
@@ -1681,7 +1590,6 @@ window.labBridge = {
   },
 };
 window.addEventListener('lab3d-ready', () => { if (state.tab === 'floor') render(); });
-// If the 3D module fails to load, fall back to the 2D floor.
 setTimeout(() => {
   if (!window.Lab3D && state.scene3d) window.labBridge.fail('3D engine could not load. Showing the 2D lab.');
 }, 12000);

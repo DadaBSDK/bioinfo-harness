@@ -1,4 +1,3 @@
-# Structural bioinformatics: MD and docking (pdb / topology / trajectory).
 capabilities:
   - id: pdb_fetch
     domain: structural

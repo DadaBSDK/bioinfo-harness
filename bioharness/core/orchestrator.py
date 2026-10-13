@@ -56,7 +56,6 @@ class Orchestrator:
         self.executor = Executor(registry, workspace, self.rails)
         self.tasks: list[Task] = []
 
-    # -- execution ---------------------------------------------------------
     def run(self, workflow: Workflow, params: dict[str, Any] | None = None,
             stop_on_failure: bool = True,
             actor: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -70,7 +69,6 @@ class Orchestrator:
         self.ws.create({
             "workflow": workflow.name, "description": workflow.description,
             "params": merged, "dry_run": self.rails.dry_run,
-            # Record the DAG up front so it can be drawn even if the run dies.
             "graph": [{"id": s.id, "capability": s.capability, "needs": s.needs,
                        "scatter": s.scatter, "description": s.description}
                       for s in workflow.steps],
@@ -83,7 +81,6 @@ class Orchestrator:
         results: dict[str, Task] = {}
         started = time.time()
 
-        # Dry runs skip every step, so skips must not cascade.
         blocking = ({Status.FAILED, Status.BLOCKED} if self.rails.dry_run
                     else {Status.FAILED, Status.BLOCKED, Status.SKIPPED})
 
@@ -221,7 +218,7 @@ class Orchestrator:
     def _domain(self, capability: str) -> str:
         try:
             return self.registry.get(capability).domain
-        except Exception:  # noqa: BLE001 - unknown capability, handled later
+        except Exception:
             return ""
 
     def _failed(self, step: Step, reason: str) -> Task:

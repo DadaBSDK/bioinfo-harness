@@ -96,7 +96,6 @@ if __name__=='__main__':
     (OUT/'models.json').write_text(json.dumps({'version':1,'box_schema':['x','bottom_y','z','width','height','depth','material'],'materials':PALETTE,'models':MODELS},indent=2)+'\n')
     print(f'Generated {len(PALETTE)} textures and {len(MODELS)} models in {OUT}')
 
-# Export each model as a self-contained .glb with embedded textures.
 def export_glb(boxes):
     positions=[]; normals=[]; uvs=[]; indices=[]
     faces=[((1,0,0),[(.5,-.5,.5),(.5,-.5,-.5),(.5,.5,-.5),(.5,.5,.5)]),

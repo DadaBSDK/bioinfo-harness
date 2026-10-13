@@ -27,9 +27,9 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from bioharness.cli import attend, main as cli_main  # noqa: E402
-from bioharness.core.brief import gather, render  # noqa: E402
-from bioharness.server import Dashboard  # noqa: E402
+from bioharness.cli import attend, main as cli_main
+from bioharness.core.brief import gather, render
+from bioharness.server import Dashboard
 
 DATA = ROOT / "demo" / "data"
 LAB_NAME = "Kim Lab"
@@ -70,7 +70,7 @@ def snapshot(work: Path, out: Path) -> None:
     scrub = scrubber(work)
     if out.exists():
         shutil.rmtree(out)
-    put = lambda rel, value: write(out / rel, scrub(value))  # noqa: E731
+    put = lambda rel, value: write(out / rel, scrub(value))
 
     put("overview.json", dash.overview())
     put("runs.json", dash.run_list())

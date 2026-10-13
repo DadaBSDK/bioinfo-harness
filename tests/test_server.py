@@ -79,7 +79,6 @@ def get(base: str, path: str):
         return json.loads(r.read())
 
 
-# -- reading state ---------------------------------------------------------
 def test_overview_counts_runs_and_capabilities(live):
     _, base, _ = live
     o = get(base, "/api/overview")
@@ -94,7 +93,7 @@ def test_run_list_reports_status(live):
     assert len(runs) == 1
     assert runs[0]["run_id"] == summary["run_id"]
     assert runs[0]["status"] == "ok"
-    assert runs[0]["steps"] == 2          # graph recorded in run.json
+    assert runs[0]["steps"] == 2
 
 
 def test_run_detail_exposes_graph_tasks_and_hashes(live):
@@ -118,7 +117,7 @@ def test_hive_state_includes_mail_blackboard_and_cost(live):
     h = get(base, "/api/hive")
     planner = next(a for a in h["agents"] if a["name"] == "planner")
     assert planner["inbox"][0]["topic"] == "plan.request"
-    assert planner["inbox_pending"] == 1       # peeked, never consumed
+    assert planner["inbox_pending"] == 1
     assert any(e["key"] == "qc/last" for e in h["blackboard"])
     assert h["cost"]["total_usd"] == pytest.approx(0.015)
 
@@ -150,7 +149,6 @@ def test_index_html_is_served(live):
     assert "Bioinfo" in body and r.headers["Content-Type"].startswith("text/html")
 
 
-# -- failure paths ---------------------------------------------------------
 def test_unknown_run_returns_404(live):
     _, base, _ = live
     with pytest.raises(urllib.error.HTTPError) as exc:
@@ -185,13 +183,11 @@ def test_missing_paths_do_not_crash(tmp_path: Path):
     assert dash.hive_state()["agents"] == []
 
 
-# -- floor state -----------------------------------------------------------
 def test_floor_state_seats_and_statuses_agents(live):
     _, base, _ = live
     f = get(base, "/api/floor")
     by = {a["name"]: a for a in f["agents"]}
     assert set(by) >= {"pi", "planner"}
-    # planner holds the message pi sent it
     assert by["planner"]["status"] == "awaiting"
     assert by["planner"]["inbox_pending"] == 1
     assert all("role" in a and "status" in a for a in f["agents"])
@@ -206,14 +202,13 @@ def test_floor_state_reports_traffic_and_activity(live):
 
 def test_idle_agent_when_nothing_pending(live):
     dash, base, _ = live
-    dash.hive().mailbox("planner").read(consume=True)     # drain the mail
+    dash.hive().mailbox("planner").read(consume=True)
     f = get(base, "/api/floor")
     planner = next(a for a in f["agents"] if a["name"] == "planner")
-    assert planner["status"] in ("idle", "working")       # nothing left to await
+    assert planner["status"] in ("idle", "working")
     assert planner["inbox_pending"] == 0
 
 
-# -- writing to the hive ---------------------------------------------------
 def post(base: str, path: str, payload: dict):
     req = urllib.request.Request(
         base + path, data=json.dumps(payload).encode(),
@@ -299,7 +294,6 @@ def test_ui_assets_are_served(live):
             assert kind in r.headers["Content-Type"]
 
 
-# -- staffing --------------------------------------------------------------
 def test_staff_options_lists_roles_providers_and_models(live):
     _, base, _ = live
     opt = get(base, "/api/staff/options")
@@ -390,7 +384,6 @@ def test_attach_creates_the_agent_when_it_is_new(live):
     assert any(a["name"] == "fresh" for a in hive.roster())
 
 
-# -- the conversation view -------------------------------------------------
 def test_conversation_reads_back_what_was_said(live):
     _, base, _ = live
     convo = get(base, "/api/conversation")
@@ -398,7 +391,6 @@ def test_conversation_reads_back_what_was_said(live):
     first = convo[0]
     assert (first["sender"], first["recipient"]) == ("pi", "planner")
     assert first["sender_role"] == "pi"
-    # A plan request says what it is asking for, not `{"goal": "..."}`.
     assert first["say"] == "call variants"
 
 
@@ -416,7 +408,6 @@ def test_floor_carries_the_last_utterances_for_the_bubbles(live):
     dash.hive().send("pi", "planner", "peer.ask", {"question": "how long will this take?"})
     chatter = get(base, "/api/floor")["chatter"]
     assert chatter[-1]["say"] == "how long will this take?"
-    # The bubble needs a line, not a whole message body.
     assert "body" not in chatter[-1]
 
 
@@ -468,7 +459,7 @@ def test_malformed_post_payloads_return_json_errors(live):
             urllib.request.urlopen(req, timeout=5)
         assert exc.value.code == 400
         assert json.loads(exc.value.read())['ok'] is False
-    assert get(base, '/api/floor')['agents']  # the server remains responsive
+    assert get(base, '/api/floor')['agents']
 
 
 def test_negative_and_oversized_content_length_are_rejected(live):

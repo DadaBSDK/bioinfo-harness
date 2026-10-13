@@ -57,7 +57,6 @@ def test_every_sprite_the_ui_asks_for_exists(atlas):
     frames = set(atlas["frames"])
 
     referenced: set[str] = set()
-    # ROLE_SPRITE, SPRITE_POOL and the rooms' prop lists
     for prefix in ("char_", "sit_", "floor_", "wall_", "counter_"):
         referenced |= set(re.findall(rf"'({prefix}[a-z_]+)'", js))
     for key in ("wall", "floorProps"):
@@ -80,9 +79,8 @@ def test_every_seated_sprite_has_a_standing_counterpart(atlas):
 
 def test_characters_tiles_and_walls_are_catalogued(atlas):
     assert len(atlas["characters"]) >= 6
-    assert "floor_lino" in atlas["tiles"]        # the renderer's fallback tile
+    assert "floor_lino" in atlas["tiles"]
     assert "wall_run" in atlas["walls"] and "wall_door" in atlas["walls"]
-    # Wall pieces are drawn as a band, never as a 32px tile.
     assert not set(atlas["walls"]) & set(atlas["tiles"])
 
 
@@ -107,7 +105,6 @@ def test_ui_assets_are_reachable_by_the_server():
     assert target.is_file()
 
 
-# -- floor geometry --------------------------------------------------------
 def _node_available() -> bool:
     import shutil
     return shutil.which("node") is not None

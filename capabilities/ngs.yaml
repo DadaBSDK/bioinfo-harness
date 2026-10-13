@@ -1,5 +1,3 @@
-# Short-read NGS capabilities. Ordinary manifests: deleting this file removes
-# NGS support without touching the core.
 capabilities:
   - id: fastqc
     domain: ngs

@@ -20,9 +20,7 @@ def usage(**kw):
     return SimpleNamespace(**{**base, **kw})
 
 
-# -- pricing ---------------------------------------------------------------
 def test_price_uses_the_published_rates():
-    # 1M input + 1M output on Opus 5 is $5 + $25.
     assert price("claude-opus-5", usage(input_tokens=1_000_000)) == pytest.approx(5.0)
     assert price("claude-opus-5", usage(output_tokens=1_000_000)) == pytest.approx(25.0)
 
@@ -55,7 +53,6 @@ def test_default_model_is_opus_5():
     assert APIProvider().model == "claude-opus-5"
 
 
-# -- credentials -----------------------------------------------------------
 def test_api_key_is_detected(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
     ok, why = credentials_present()
@@ -88,7 +85,6 @@ def test_provider_reports_itself_unusable_without_credentials(monkeypatch):
         p.ask("hello")
 
 
-# -- factory ---------------------------------------------------------------
 def test_make_provider_builds_the_api_provider():
     p = make_provider("claude-api", "claude-sonnet-5")
     assert isinstance(p, APIProvider) and p.model == "claude-sonnet-5"

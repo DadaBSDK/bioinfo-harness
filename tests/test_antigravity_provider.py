@@ -43,7 +43,6 @@ def installed(monkeypatch):
     monkeypatch.setattr(f"{MOD}.shutil.which", lambda _: "/usr/bin/agy")
 
 
-# -- discovery -------------------------------------------------------------
 def test_missing_binary_is_reported(monkeypatch):
     monkeypatch.setattr(f"{MOD}.shutil.which", lambda _: None)
     p = AntigravityProvider()
@@ -72,15 +71,14 @@ def test_no_model_named_is_allowed(monkeypatch, installed):
     assert AntigravityProvider().available()
 
 
-# -- a successful call -----------------------------------------------------
 def test_usage_includes_thinking_and_cache_reads(monkeypatch, installed):
     monkeypatch.setattr(f"{MOD}.subprocess.run", run_returns(stdout=json.dumps(OK_JSON)))
     r = AntigravityProvider(model="m").ask("hi")
     assert r.text == "harness online"
-    assert r.tokens_in == 5450 + 8129     # prompt plus cache reads
-    assert r.tokens_out == 28 + 25        # answer plus thinking
+    assert r.tokens_in == 5450 + 8129
+    assert r.tokens_out == 28 + 25
     assert r.seconds == 3.0
-    assert r.usd == 0.0                   # billed through the plan, not per call
+    assert r.usd == 0.0
 
 
 def test_model_and_effort_reach_the_command_line(monkeypatch, installed):
@@ -108,7 +106,6 @@ def test_an_invalid_effort_is_not_passed_through(monkeypatch, installed):
     assert "--effort" not in seen["cmd"]
 
 
-# -- failure paths ---------------------------------------------------------
 def test_a_nonzero_exit_is_surfaced(monkeypatch, installed):
     monkeypatch.setattr(f"{MOD}.subprocess.run",
                         run_returns(stderr="not signed in", code=1))
@@ -148,7 +145,6 @@ def test_a_timeout_is_retryable(monkeypatch, installed):
     assert exc.value.retryable is True
 
 
-# -- wiring ----------------------------------------------------------------
 def test_factory_builds_the_dedicated_provider():
     p = make_provider("antigravity", "gemini-3.8-flash-low")
     assert isinstance(p, AntigravityProvider)
@@ -160,7 +156,6 @@ def test_the_generic_cli_wrapper_does_not_shadow_it():
     assert "antigravity" not in PROVIDERS
 
 
-# -- caching ---------------------------------------------------------------
 def test_the_model_listing_is_cached(monkeypatch, installed):
     """Model listing spawns the CLI, so results are cached."""
     calls = {"n": 0}
@@ -199,7 +194,6 @@ def test_a_failed_listing_is_cached_too(monkeypatch, installed):
     assert calls["n"] == 1
 
 
-# -- structured output -----------------------------------------------------
 def test_structured_output_wins_over_the_prose_response(monkeypatch, installed):
     """With --json-schema the CLI puts the validated object in
     structured_output and leaves response as fenced prose."""
@@ -245,7 +239,6 @@ def test_an_empty_schema_reply_is_retried_without_the_schema(monkeypatch, instal
     r = AntigravityProvider(model="m", json_schema='{"type":"object"}').ask("hi")
     assert json.loads(r.text) == {"name": "recovered"}
     assert len(calls) == 2 and "--json-schema" not in calls[1]
-    # The wasted thinking tokens still count against the ledger.
     assert r.tokens_out == 1186 + 20
 
 

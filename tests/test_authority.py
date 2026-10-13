@@ -46,7 +46,6 @@ def _run_as(ctx: AgentContext, actor: dict | None):
     return orch.run(workflow_from_dict(WORKFLOW), actor=actor)
 
 
-# -- the ladder, enforced --------------------------------------------------
 def test_a_human_at_the_cli_is_not_gated(ctx: AgentContext):
     assert _run_as(ctx, None)["status"] == "ok"
 
@@ -100,7 +99,6 @@ def test_a_blocked_step_is_recorded_in_the_run(ctx: AgentContext):
     assert "step.blocked" in events
 
 
-# -- the runner ------------------------------------------------------------
 def test_a_runner_at_full_executes_the_workflow(ctx: AgentContext):
     ctx.hive.enroll("rex", "runner", autonomy="full")
     rex = Runner("rex", ctx)
@@ -122,7 +120,7 @@ def test_a_runner_refuses_a_workflow_with_unbound_parameters(ctx: AgentContext):
 def test_the_identity_autonomy_beats_the_role_default(ctx: AgentContext):
     """`staff assign --autonomy full` is the operator's decision."""
     ctx.hive.enroll("rex", "runner", autonomy="full")
-    rex = Runner("rex", ctx)                      # role default is BOUNDED
+    rex = Runner("rex", ctx)
     assert rex.actor()["autonomy"] == "full"
 
 
@@ -186,7 +184,6 @@ def test_a_runner_accepts_a_parameter_supplied_with_the_request(ctx: AgentContex
     assert result["ok"] is True
 
 
-# -- orders for data that is not here yet ----------------------------------
 def test_a_fetch_goal_plans_a_fetch_step(registry: Registry, tmp_path: Path):
     """"Fetch the data online and run it" needs a route that starts with a
     download, not with a fastq file somebody already has."""
@@ -205,7 +202,6 @@ def test_a_fetch_goal_plans_a_fetch_step(registry: Registry, tmp_path: Path):
         "start_type": "fastq", "goal_type": "vcf", "domain": "ngs"}))
     steps = [s["capability"] for s in result["workflow"]["steps"]]
     assert steps[0] == "ena_fetch", steps
-    # The accession is surfaced as a required parameter.
     assert "accession" in result["workflow"]["params"]
 
 
@@ -223,7 +219,6 @@ def test_a_plan_with_holes_asks_the_operator_not_the_room(ctx: AgentContext):
     asked = ctx.hive.mailbox("human").peek()
     assert [m.topic for m in asked] == ["needs"]
     assert asked[0].body["needs"] == ["accession", "reference"]
-    # No other agent was messaged.
     assert ctx.hive.mailbox("iris").peek() == []
     assert ctx.hive.mailbox("rex").peek() == []
 
@@ -275,7 +270,6 @@ def test_a_runner_accepts_a_fetch_once_the_accession_is_given(tmp_path: Path):
     plan = {"name": "fetch", "steps": [
         {"id": "fetch", "capability": "ena_fetch",
          "params": {"accession": "SRR000001", "max_reads": 4}}]}
-    # Only the pre-flight check is exercised; nothing runs.
     assert rex._demanded_params(plan) == set()
 
 

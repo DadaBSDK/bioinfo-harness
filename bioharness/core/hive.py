@@ -69,7 +69,6 @@ class Mailbox:
              thread: str | None = None) -> Message:
         msg = Message(id=new_id("msg"), sender=self.name, recipient=recipient,
                       topic=topic, body=body, thread=thread)
-        # A message that answers nothing starts its own thread; replies share its id.
         if msg.thread is None:
             msg.thread = msg.id
         atomic_write(self.outbox / f"{msg.ts:.6f}-{msg.id}.json",
@@ -82,7 +81,7 @@ class Mailbox:
             try:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
-                continue  # mid-write; picked up next poll
+                continue
             if topic and data.get("topic") != topic:
                 continue
             msgs.append(_msg_obj(data))
@@ -220,7 +219,7 @@ class MemoryPalace:
                 args.append(limit)
                 return [dict(r) for r in self.conn.execute(sql, args)]
             except sqlite3.OperationalError:
-                pass  # fall through to LIKE
+                pass
         terms = [t for t in re.split(r"\W+", query.lower()) if t]
         rows = [dict(r) for r in self.conn.execute("SELECT * FROM notes ORDER BY ts DESC")]
         if agent:
@@ -292,7 +291,6 @@ class Hive:
         self.palace = MemoryPalace(self.root)
         self._boxes: dict[str, Mailbox] = {}
 
-    # -- the lab itself ----------------------------------------------------
     DEFAULT_LAB_NAME = "Voxel Lab"
     LAB_NAME_MAX = 60
 
@@ -313,7 +311,6 @@ class Hive:
         self.event("lab.renamed", {"name": name})
         return name
 
-    # -- agents ------------------------------------------------------------
     def mailbox(self, name: str) -> Mailbox:
         if name not in self._boxes:
             self._boxes[name] = Mailbox(self.root, name)
@@ -453,7 +450,7 @@ class Hive:
                     try:
                         data = json.loads(f.read_text())
                     except (json.JSONDecodeError, OSError):
-                        continue  # mid-write
+                        continue
                     mid = data.get("id")
                     if mid and mid not in seen:
                         data["delivered"] = box != "outbox"
@@ -461,8 +458,6 @@ class Hive:
         ordered = sorted(seen.values(), key=lambda m: float(m.get("ts", 0.0)))
         return ordered[-limit:] if limit else ordered
 
-    # Work memory and social memory are kept in separate files; only work memory
-    # is recalled as context.
     MEMORY_FILES = {"memory": "memory.md", "social": "social.md"}
 
     def append_memory(self, agent: str, text: str, heading: str | None = None,
@@ -473,7 +468,6 @@ class Hive:
             fh.write(block)
         self.palace.index_markdown(mem, agent, kind=kind)
 
-    # -- routing -----------------------------------------------------------
     def route(self) -> int:
         """Move every outbox message to its recipient's inbox.
 
@@ -496,7 +490,7 @@ class Hive:
                 try:
                     f.replace(claimed)
                 except OSError:
-                    continue  # another router claimed it first
+                    continue
                 try:
                     data = json.loads(claimed.read_text())
                 except (json.JSONDecodeError, OSError):
@@ -523,7 +517,6 @@ class Hive:
             self.route()
         return msg
 
-    # -- event log ---------------------------------------------------------
     def event(self, kind: str, payload: dict[str, Any] | None = None) -> None:
         line = json.dumps({"ts": time.time(), "event": kind, "payload": payload or {}},
                           default=str)
@@ -545,7 +538,6 @@ class Hive:
                 out.append(rec)
         return out[-limit:] if limit else out
 
-    # -- cost ledger -------------------------------------------------------
     def charge(self, agent: str, tokens_in: int = 0, tokens_out: int = 0,
                usd: float = 0.0, model: str = "", note: str = "") -> None:
         self.event("cost.charged", {"agent": agent, "tokens_in": tokens_in,

@@ -69,7 +69,7 @@ def test_an_agent_knows_the_building_and_who_is_in_it(ctx: AgentContext):
     assert "Sequencing Bay" in prompt and "You work in the Sequencing Bay" in prompt
     assert "hugo (pi) — Planning Office" in prompt
     assert "rex (runner) — Compute Cluster" in prompt
-    assert "iris (curator) —" not in prompt          # it knows where it is already
+    assert "iris (curator) —" not in prompt
     assert "Do not invent one" in prompt
 
 

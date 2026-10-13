@@ -42,7 +42,6 @@ def http_error(code: int, message: str) -> urllib.error.HTTPError:
     return urllib.error.HTTPError("u", code, "err", {}, BytesIO(body))
 
 
-# -- credentials -----------------------------------------------------------
 @pytest.mark.parametrize("var", KEY_VARS)
 def test_any_of_the_documented_key_vars_is_accepted(monkeypatch, var):
     monkeypatch.setenv(var, "AIza-test")
@@ -54,7 +53,6 @@ def test_no_key_is_reported_clearly():
     assert not p.available()
     reason = p.unavailable_reason()
     assert "GEMINI_API_KEY" in reason
-    # The reason also explains that AV_API_KEY is not a Gemini key.
     assert "AV_API_KEY" in reason
 
 
@@ -67,7 +65,6 @@ def test_model_listing_is_empty_without_a_key():
     assert available_models() == []
 
 
-# -- model discovery -------------------------------------------------------
 def test_only_models_that_can_generate_are_offered(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setattr(f"{MOD}._request", lambda *a, **k: {"models": [
@@ -94,7 +91,6 @@ def test_a_model_the_key_cannot_use_is_reported(monkeypatch):
     assert "not available to this key" in p.unavailable_reason()
 
 
-# -- error translation -----------------------------------------------------
 @pytest.mark.parametrize("code,expect", [
     (401, "key was rejected"), (403, "key was rejected"),
     (429, "rate limit"), (404, "no such Gemini model"), (500, "error 500"),
@@ -131,7 +127,6 @@ def test_a_blocked_prompt_is_explained(monkeypatch):
         GeminiProvider(model="gemini-x").ask("hi")
 
 
-# -- a successful call -----------------------------------------------------
 def test_reply_carries_text_and_token_usage(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["gemini-x"])
@@ -143,7 +138,6 @@ def test_reply_carries_text_and_token_usage(monkeypatch):
     assert reply.text == "BWA"
     assert reply.tokens_in == 40 and reply.tokens_out == 3
     assert reply.provider == "gemini-api:gemini-x"
-    # Tokens are recorded; no price table is claimed for Gemini.
     assert reply.usd == 0.0
 
 
@@ -152,7 +146,6 @@ def test_factory_builds_the_gemini_provider():
     assert isinstance(p, GeminiProvider) and p.model == "gemini-x"
 
 
-# -- transient failures ----------------------------------------------------
 @pytest.mark.parametrize("code", [429, 500, 502, 503, 504])
 def test_overload_and_rate_limits_are_marked_retryable(monkeypatch, code):
     monkeypatch.setenv("GEMINI_API_KEY", "k")

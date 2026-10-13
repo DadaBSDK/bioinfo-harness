@@ -22,13 +22,11 @@ from PIL import Image, ImageFilter
 RAW = Path("assets/raw")
 OUT = Path("bioharness/ui/assets")
 
-# Sprites are named in reading order (rows top to bottom, left to right).
-# `None` discards a cell -- the generator produced several near-duplicates.
 SHEETS: dict[str, dict] = {
     "characters.png": {
         "names": ["char_senior", "char_tablet", "char_goggles", "char_pipette",
                   "char_hoodie", "char_curly", "char_hijab", "char_casual"],
-        "height": 34,          # native px; drawn at 2x on the floor
+        "height": 34,
         "kind": "sprite",
     },
     "props.png": {
@@ -39,15 +37,13 @@ SHEETS: dict[str, dict] = {
         "max": 30,
         "kind": "sprite",
     },
-    # The wall row sits on a dark background rather than the magenta field, so
-    # blob detection cannot separate its cells -- it gets a fixed-grid pass.
     "walls_props.png": {
         "strip": {"box": (0, 5, 1024, 195), "cells": 5, "size": (64, 60),
                   "names": ["wall_run", None, "wall_corner_l", "wall_corner_r", "wall_door"]},
         "below": 200,
         "names": ["pcr", "incubator", "freezer", "gel_dock", "sink", "shelving",
                   "filing_cabinet", "printer", "table", "sofa", "water_cooler", "clock",
-                  *[None] * 12],          # the generator repeated the last two rows
+                  *[None] * 12],
         "max": 34,
         "kind": "sprite",
     },
@@ -55,7 +51,7 @@ SHEETS: dict[str, dict] = {
         "names": ["sit_senior", "sit_tablet", "sit_goggles", "sit_pipette",
                   "sit_hoodie", "sit_curly", None, None,
                   "counter_l", "counter_m", None, "counter_r"],
-        "height": 42,          # people-at-desks and counter runs share a height
+        "height": 42,
         "kind": "sprite",
     },
     "tiles.png": {
@@ -68,8 +64,8 @@ SHEETS: dict[str, dict] = {
 }
 
 MAGENTA_TOLERANCE = 90
-MIN_AREA = 400          # drops the stray sparkle artefacts the model adds
-JOIN_RADIUS = 5         # dilation used only for grouping, never for output
+MIN_AREA = 400
+JOIN_RADIUS = 5
 
 
 def key_magenta(img: Image.Image) -> Image.Image:
@@ -167,8 +163,6 @@ def extract_strip(img: Image.Image, strip: dict) -> dict[str, Image.Image]:
         if name is None:
             continue
         cell = band.crop((round(i * step), 0, round((i + 1) * step), band.height))
-        # Trim the dividing rules the generator drew between cells. These must
-        # go entirely: any remnant becomes a repeating seam once the wall tiles.
         cell = cell.crop((9, 0, cell.width - 9, cell.height))
         out[name] = flatten(cell.resize(strip["size"], Image.BOX))
     return out
@@ -194,10 +188,8 @@ def extract(path: Path, spec: dict) -> dict[str, Image.Image]:
         if name is None:
             continue
         crop = img.crop(box)
-        crop = crop.crop(crop.getchannel("A").getbbox())     # tighten
+        crop = crop.crop(crop.getchannel("A").getbbox())
         if spec["kind"] == "tile":
-            # Tiles are solid squares: shave the outer ring rather than erode,
-            # so the texture stays edge to edge and still tiles seamlessly.
             inset = 5
             if crop.width > inset * 3 and crop.height > inset * 3:
                 crop = crop.crop((inset, inset, crop.width - inset, crop.height - inset))
@@ -250,9 +242,6 @@ def main() -> None:
     (OUT / "atlas.json").write_text(json.dumps({
         "image": "assets/atlas.png",
         "frames": frames,
-        # Categories the renderer reads. "tiles" are the 32x32 repeating
-        # surfaces; the wall run/door pieces are a different size and shape and
-        # are drawn as a band, so they are catalogued separately.
         "tiles": sorted(n for n, f in frames.items()
                         if f["w"] == 32 and f["h"] == 32),
         "walls": sorted(n for n in frames

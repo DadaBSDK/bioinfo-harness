@@ -2,8 +2,8 @@ name: wgs-variants
 description: Short-read WGS from raw reads to annotated variants, with QC gating.
 
 params:
-  reads: null            # set with: --set reads=/data/sample_R1.fastq.gz
-  reference: null        # set with: --set reference=/refs/GRCh38.fa
+  reads: null
+  reference: null
   genome_build: GRCh38.99
   threads: 8
 

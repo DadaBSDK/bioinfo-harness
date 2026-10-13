@@ -4,7 +4,7 @@ description: Fetch a structure, prepare a solvated system, run MD, measure stabi
 params:
   pdb_id: "1AKI"
   forcefield: amber99sb-ildn
-  nsteps: 500000        # 1 ns at 2 fs
+  nsteps: 500000
   threads: 8
 
 steps:

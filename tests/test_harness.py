@@ -26,7 +26,6 @@ from bioharness.core.schemas import Status
 from bioharness.core.template import render, render_value
 from bioharness.core.workspace import Workspace
 
-# -- fixtures --------------------------------------------------------------
 ECHO = {
     "id": "make_text", "domain": "test", "summary": "write a file",
     "runtime": {"kind": "binary", "binary": "sh"},
@@ -62,7 +61,6 @@ def orch(registry: Registry, tmp_path: Path) -> Orchestrator:
     return Orchestrator(registry, Workspace(tmp_path / "runs"), Guardrails())
 
 
-# -- templating ------------------------------------------------------------
 def test_render_substitutes_dotted_paths():
     assert render("{{ a.b }}/x", {"a": {"b": "v"}}) == "v/x"
 
@@ -76,7 +74,6 @@ def test_render_joins_list_inputs():
     assert render("{{ inputs.reads }}", {"inputs": {"reads": ["a.fq", "b.fq"]}}) == "a.fq b.fq"
 
 
-# -- registry --------------------------------------------------------------
 def test_registry_loads_shipped_manifests():
     reg = Registry.load(Path(__file__).resolve().parents[1] / "capabilities")
     assert len(reg) >= 10
@@ -101,7 +98,6 @@ def test_probe_reports_missing_binary():
     assert not ok and "not on PATH" in reason
 
 
-# -- type-graph planning ---------------------------------------------------
 def test_plan_by_types_finds_chain(registry: Registry):
     assert plan_by_types(registry, "text", "shout") == ["upper"]
 
@@ -116,7 +112,6 @@ def test_plan_by_types_on_real_ngs_manifests():
     assert chain and chain[-1] == "bcftools_call"
 
 
-# -- DAG -------------------------------------------------------------------
 def test_topo_sort_orders_dependencies():
     wf = workflow_from_dict({"name": "w", "steps": [
         {"id": "b", "capability": "upper", "needs": ["a"]},
@@ -139,7 +134,6 @@ def test_topo_sort_detects_dangling_dependency():
         topo_sort(wf)
 
 
-# -- execution -------------------------------------------------------------
 def test_workflow_runs_and_chains_outputs(orch: Orchestrator):
     wf = workflow_from_dict({"name": "chain", "params": {"msg": "harness"}, "steps": [
         {"id": "make", "capability": "make_text", "params": {"message": "{{ params.msg }}"}},
@@ -206,7 +200,6 @@ def test_retries_are_attempted(registry, tmp_path):
     assert len(retries) == 2
 
 
-# -- provenance ------------------------------------------------------------
 def test_provenance_records_hashes(orch: Orchestrator):
     summary = orch.run(workflow_from_dict(
         {"name": "p", "steps": [{"id": "make", "capability": "make_text"}]}))
@@ -222,7 +215,6 @@ def test_run_listing_finds_the_run(orch: Orchestrator, tmp_path):
     assert len(runs) == 1 and runs[0]["workflow"] == "l"
 
 
-# -- guardrails ------------------------------------------------------------
 def test_budget_trips_on_step_ceiling():
     b = Budget(max_steps=2)
     b.charge(steps=2)
@@ -243,7 +235,7 @@ def test_circuit_breaker_opens_then_cools_down():
     cb = CircuitBreaker(failure_threshold=2, cooldown_s=0.0)
     cb.record_failure("x")
     cb.record_failure("x")
-    assert cb.state("x") == "half-open"       # cooldown already elapsed
+    assert cb.state("x") == "half-open"
     cb2 = CircuitBreaker(failure_threshold=1, cooldown_s=60)
     cb2.record_failure("y")
     with pytest.raises(GuardrailTripped, match="circuit breaker"):
@@ -261,7 +253,6 @@ def test_intervention_ladder_escalates_and_relaxes():
     assert i.level("a") == "constrain"
 
 
-# -- hive ------------------------------------------------------------------
 def test_router_delivers_between_mailboxes(tmp_path):
     hive = Hive(tmp_path / "hive")
     hive.enroll("alice", "planner")
@@ -269,7 +260,7 @@ def test_router_delivers_between_mailboxes(tmp_path):
     hive.send("alice", "bob", "plan.request", {"goal": "call variants"})
     msgs = hive.mailbox("bob").read()
     assert len(msgs) == 1 and msgs[0].body["goal"] == "call variants"
-    assert hive.mailbox("bob").pending() == 0     # consumed
+    assert hive.mailbox("bob").pending() == 0
 
 
 def test_broadcast_reaches_everyone_but_sender(tmp_path):
@@ -307,7 +298,6 @@ def test_cost_ledger_aggregates(tmp_path):
     assert ledger["total_tokens"] == 1800
 
 
-# -- agents ----------------------------------------------------------------
 @pytest.fixture
 def ctx(registry: Registry, tmp_path: Path) -> AgentContext:
     return AgentContext(hive=Hive(tmp_path / "hive"), registry=registry,
@@ -370,11 +360,10 @@ def test_agent_error_is_reported_not_raised(ctx: AgentContext):
     validator = Validator("validator", ctx)
     ctx.hive.enroll("runner", "runner")
     ctx.hive.send("runner", "validator", "qc.check", {"metrics": "not-a-dict"})
-    assert validator.tick() == 0                    # handled as an error message
-    assert ctx.hive.mailbox("runner").peek()         # error was mailed back
+    assert validator.tick() == 0
+    assert ctx.hive.mailbox("runner").peek()
 
 
-# -- python-runtime capability --------------------------------------------
 def test_metrics_extract_parses_fastp_json(tmp_path: Path):
     from bioharness.tools.metrics import extract
     src = tmp_path / "fastp.json"
@@ -397,7 +386,6 @@ def test_metrics_extract_parses_flagstat_text(tmp_path: Path):
     assert metrics["total_reads"] == 1000.0
 
 
-# -- dry-run resolves the whole DAG ---------------------------------------
 def test_dry_run_resolves_every_step_not_just_the_first(registry, tmp_path):
     o = Orchestrator(registry, Workspace(tmp_path / "r"), Guardrails(dry_run=True))
     summary = o.run(workflow_from_dict({"name": "d", "steps": [
@@ -423,7 +411,6 @@ def test_unresolvable_binding_fails_that_step_with_a_clear_message(registry, tmp
     assert "cannot resolve 'params.nope'" in summary["tasks"][0]["error"]
 
 
-# -- auto-planned workflows are complete ----------------------------------
 def test_auto_plan_binds_every_required_port(tmp_path):
     reg = Registry.load(Path(__file__).resolve().parents[1] / "capabilities")
     ctx = AgentContext(hive=Hive(tmp_path / "hive"), registry=reg,
@@ -431,7 +418,6 @@ def test_auto_plan_binds_every_required_port(tmp_path):
     from bioharness.agents.roles import Planner
     wf = Planner("planner", ctx)._linear_workflow(
         "fastq-to-vcf", plan_by_types(reg, "fastq", "vcf", "ngs"))
-    # every required input of every step must be bound to something
     for step in wf["steps"]:
         for port in reg.get(step["capability"]).inputs:
             if not port.optional:
@@ -453,7 +439,6 @@ def test_auto_planned_workflow_dry_runs_end_to_end(tmp_path):
     assert all(t["command"] for t in summary["tasks"])
 
 
-# -- shipped workflow files stay valid ------------------------------------
 @pytest.mark.parametrize("name", ["wgs-variants", "md-stability", "dock-screen"])
 def test_shipped_workflows_load_and_reference_real_capabilities(name):
     root = Path(__file__).resolve().parents[1]
@@ -463,7 +448,7 @@ def test_shipped_workflows_load_and_reference_real_capabilities(name):
     assert wf.steps
     for step in wf.steps:
         assert step.capability in reg, f"{name}: unknown capability {step.capability}"
-    topo_sort(wf)     # must be acyclic and fully connected
+    topo_sort(wf)
 
 
 def test_workflow_runs_in_a_directory_with_spaces_and_quotes(registry, tmp_path):

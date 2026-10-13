@@ -32,7 +32,6 @@ class Executor:
         self.rails = guardrails or Guardrails()
         self.env = {**os.environ, **(env or {})}
 
-    # -- binding -----------------------------------------------------------
     def bind(self, task: Task) -> Task:
         """Resolve the command template against inputs/params and validate ports."""
         cap = self.registry.get(task.capability)
@@ -125,7 +124,6 @@ class Executor:
             out += ["-v", f"{host}:{host}"]
         return out
 
-    # -- running -----------------------------------------------------------
     def run(self, task: Task) -> Task:
         cap = self.registry.get(task.capability)
         self.bind(task)
@@ -140,7 +138,6 @@ class Executor:
         if self.rails.dry_run:
             task.status = Status.SKIPPED
             task.error = "dry-run"
-            # Predict outputs so downstream templates resolve during a dry run.
             task.outputs = self.predict(cap, task)
             self.ws.record("task.dry_run", {"step": task.step_id, "capability": cap.id,
                                             "argv": task.argv or task.rendered,
@@ -178,7 +175,7 @@ class Executor:
         except subprocess.TimeoutExpired:
             task.status = Status.FAILED
             task.error = f"timed out after {cap.resources.walltime_min} min"
-        except Exception as exc:  # noqa: BLE001 - tool failures are recorded
+        except Exception as exc:
             task.status = Status.FAILED
             task.error = str(exc)
         finally:
@@ -212,7 +209,6 @@ class Executor:
         out: dict[str, Any] = {}
         for port in cap.outputs:
             pattern = str(render_value(port.glob or port.name, context))
-            # Strip glob wildcards to get a plausible file name.
             name = pattern.replace("*", f"{task.step_id}").replace("?", "_")
             out[port.name] = [str(workdir / name)] if port.multiple else str(workdir / name)
         return out

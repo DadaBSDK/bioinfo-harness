@@ -71,7 +71,7 @@ def test_the_attendant_picks_up_someone_hired_while_it_runs(tmp_path: Path):
     assert run_until(hive_root, [], hire_once_then_wait), \
         "an agent hired after the attendant started never ran"
     assert roster_key(hive) != before
-    assert hive.blackboard.get("curation/last")["ok"] is False   # the path is missing
+    assert hive.blackboard.get("curation/last")["ok"] is False
 
 
 def test_one_broken_agent_does_not_stop_the_room(tmp_path: Path, monkeypatch):

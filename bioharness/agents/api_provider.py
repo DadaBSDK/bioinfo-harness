@@ -16,12 +16,11 @@ from .base import LLMReply, ProviderUnavailable
 
 try:
     import anthropic
-except ImportError:  # pragma: no cover - the provider reports itself unavailable
+except ImportError:
     anthropic = None
 
 DEFAULT_MODEL = "claude-opus-5"
 
-# USD per million tokens. Cache reads are ~0.1x input, cache writes ~1.25x.
 PRICING: dict[str, tuple[float, float]] = {
     "claude-opus-5": (5.00, 25.00),
     "claude-opus-4-8": (5.00, 25.00),
@@ -30,10 +29,8 @@ PRICING: dict[str, tuple[float, float]] = {
     "claude-fable-5-1": (10.00, 50.00),
 }
 
-# Models offered in the dashboard's hire form.
 MODELS = list(PRICING)
 
-# Default reasoning effort per role.
 ROLE_EFFORT = {
     "planner": "high", "analyst": "high", "pi": "high",
     "curator": "low", "validator": "low", "scribe": "medium",
@@ -81,7 +78,7 @@ class APIProvider:
     name: str = "claude-api"
     model: str = DEFAULT_MODEL
     max_tokens: int = 16000
-    effort: str = "high"          # low | medium | high | xhigh | max
+    effort: str = "high"
     thinking: bool = True
     timeout_s: float = 600.0
     _client: Any = None
@@ -98,7 +95,6 @@ class APIProvider:
         if self._client is None:
             if anthropic is None:
                 raise ProviderUnavailable("the `anthropic` package is not installed")
-            # Resolves API key, auth token, or `ant auth login` profile, in that order.
             self._client = anthropic.Anthropic(timeout=self.timeout_s)
         return self._client
 
@@ -133,7 +129,6 @@ class APIProvider:
             raise ProviderUnavailable(f"rate limited; retry after {retry}s") from exc
         except anthropic.APIStatusError as exc:
             text = str(getattr(exc, "message", "") or exc)
-            # Out of credit fails here, not at auth; say so explicitly.
             if "credit balance" in text.lower() or "billing" in text.lower():
                 raise ProviderUnavailable(
                     "the API key is valid but the account has no credit balance "
@@ -143,7 +138,6 @@ class APIProvider:
         except anthropic.APIConnectionError as exc:
             raise ProviderUnavailable(f"network error reaching the API: {exc}") from exc
 
-        # Refusals arrive as HTTP 200; check before reading content.
         if response.stop_reason == "refusal":
             detail = getattr(response, "stop_details", None)
             category = getattr(detail, "category", None) if detail else None

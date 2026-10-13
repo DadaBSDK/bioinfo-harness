@@ -33,7 +33,6 @@ class Workspace:
         self.dir = self.root / self.run_id
         self.ledger_path = self.dir / "ledger.jsonl"
 
-    # -- lifecycle ---------------------------------------------------------
     def create(self, meta: dict[str, Any] | None = None) -> "Workspace":
         for sub in ("steps", "inputs", "results", "logs"):
             (self.dir / sub).mkdir(parents=True, exist_ok=True)
@@ -80,7 +79,6 @@ class Workspace:
         self.record("artifact.promoted", {"from": str(src), "to": str(dest)})
         return dest
 
-    # -- provenance --------------------------------------------------------
     def record(self, event: str, payload: dict[str, Any]) -> None:
         self.ledger_path.parent.mkdir(parents=True, exist_ok=True)
         line = json.dumps({"ts": time.time(), "event": event, "run_id": self.run_id,
@@ -116,7 +114,6 @@ class Workspace:
                                              "sha256": a.sha256, "bytes": a.bytes})
         return arts
 
-    # -- reporting ---------------------------------------------------------
     def summary(self) -> dict[str, Any]:
         events = self.ledger()
         tasks = [e for e in events if e["event"].startswith("task.")]

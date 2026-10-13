@@ -15,9 +15,9 @@ from typing import Any, Iterable
 
 from .schemas import Capability, Port, Resources, Runtime
 
-try:  # PyYAML is the only non-stdlib dep, and it is optional at import time.
+try:
     import yaml
-except ImportError:  # pragma: no cover
+except ImportError:
     yaml = None
 
 
@@ -81,7 +81,6 @@ class Registry:
         self._caps: dict[str, Capability] = {c.id: c for c in capabilities}
         self._probe_cache: dict[str, tuple[bool, str]] = {}
 
-    # -- loading -----------------------------------------------------------
     @classmethod
     def load(cls, *paths: str | Path) -> "Registry":
         reg = cls()
@@ -118,7 +117,6 @@ class Registry:
             raise RegistryError(f"capability {cap.id!r} already registered")
         self._caps[cap.id] = cap
 
-    # -- access ------------------------------------------------------------
     def __len__(self) -> int:
         return len(self._caps)
 
@@ -159,7 +157,6 @@ class Registry:
     def consuming(self, type_: str) -> list[Capability]:
         return [c for c in self._caps.values() if any(p.type == type_ for p in c.inputs)]
 
-    # -- availability ------------------------------------------------------
     def probe(self, cap_id: str, refresh: bool = False) -> tuple[bool, str]:
         """Is this tool actually installed here? Returns (available, reason)."""
         if not refresh and cap_id in self._probe_cache:
@@ -190,12 +187,10 @@ def _probe_capability(cap: Capability) -> tuple[bool, str]:
     if cap.runtime is Runtime.PYTHON:
         if not cap.entrypoint:
             return False, "no entrypoint declared"
-        # Check the entrypoint module and its `requires`, so lazily imported
-        # dependencies are probed too.
         for module in [cap.entrypoint.split(":")[0], *cap.requires]:
             try:
                 __import__(module)
-            except Exception as exc:  # noqa: BLE001 - probes report, never raise
+            except Exception as exc:
                 return False, f"import {module} failed: {exc}"
         deps = f" (+{', '.join(cap.requires)})" if cap.requires else ""
         return True, f"import {cap.entrypoint.split(':')[0]} ok{deps}"
@@ -209,7 +204,7 @@ def _probe_capability(cap: Capability) -> tuple[bool, str]:
         try:
             envs = subprocess.run([mgr, "env", "list"], capture_output=True,
                                   text=True, timeout=30).stdout
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             return False, f"{mgr} env list failed: {exc}"
         ok = any(line.split()[:1] == [cap.conda_env] for line in envs.splitlines() if line.strip())
         return (True, f"{mgr} env {cap.conda_env}") if ok else (False, f"env {cap.conda_env!r} not found")

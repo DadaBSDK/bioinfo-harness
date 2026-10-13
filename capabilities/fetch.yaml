@@ -1,5 +1,3 @@
-# Data download capabilities. They give the type graph a starting point when
-# the input data is not already on disk.
 capabilities:
   - id: ena_fetch
     domain: ngs

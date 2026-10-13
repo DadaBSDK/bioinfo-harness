@@ -31,12 +31,12 @@ def sha256_file(path: Path, chunk: int = 1 << 20) -> str:
 class Runtime(str, Enum):
     """How a capability's command is actually executed."""
 
-    BINARY = "binary"        # already on PATH
-    CONDA = "conda"          # conda/micromamba env
-    DOCKER = "docker"        # container image
-    APPTAINER = "apptainer"  # HPC-friendly container
-    PYTHON = "python"        # in-process python entrypoint
-    AGENT = "agent"          # delegate to an LLM agent CLI
+    BINARY = "binary"
+    CONDA = "conda"
+    DOCKER = "docker"
+    APPTAINER = "apptainer"
+    PYTHON = "python"
+    AGENT = "agent"
 
 
 class Status(str, Enum):
@@ -54,11 +54,11 @@ class Port:
     """An input or output slot on a capability."""
 
     name: str
-    type: str = "file"          # fastq | bam | vcf | pdb | trajectory | table | dir | scalar ...
+    type: str = "file"
     multiple: bool = False
     optional: bool = False
     default: Any = None
-    glob: str | None = None     # outputs: how to collect from the workspace
+    glob: str | None = None
     description: str = ""
 
 
@@ -77,22 +77,22 @@ class Capability:
 
     id: str
     summary: str = ""
-    domain: str = "general"          # ngs | structural | singlecell | cheminfo | general
+    domain: str = "general"
     version: str = "unknown"
     runtime: Runtime = Runtime.BINARY
-    command: str = ""                # templated; {{ inputs.x }}, {{ params.y }}, {{ outdir }}
+    command: str = ""
     binary: str | None = None
     image: str | None = None
     conda_env: str | None = None
-    entrypoint: str | None = None    # PYTHON runtime: "module.path:function"
+    entrypoint: str | None = None
     inputs: list[Port] = field(default_factory=list)
     outputs: list[Port] = field(default_factory=list)
     params: dict[str, Any] = field(default_factory=dict)
     resources: Resources = field(default_factory=Resources)
-    requires: list[str] = field(default_factory=list)  # python modules that must import
+    requires: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
     doc_url: str = ""
-    citation: str = ""               # so the scribe can write a Methods section
+    citation: str = ""
 
     def port(self, name: str) -> Port | None:
         for p in (*self.inputs, *self.outputs):
@@ -107,11 +107,11 @@ class Step:
 
     id: str
     capability: str
-    with_: dict[str, Any] = field(default_factory=dict)   # input bindings (templated)
+    with_: dict[str, Any] = field(default_factory=dict)
     params: dict[str, Any] = field(default_factory=dict)
     needs: list[str] = field(default_factory=list)
-    when: str | None = None        # optional guard expression over the context
-    scatter: str | None = None     # input name to fan out over
+    when: str | None = None
+    scatter: str | None = None
     retries: int = 0
     description: str = ""
 
@@ -162,7 +162,7 @@ class Message:
 
     id: str
     sender: str
-    recipient: str          # agent name, or "*" to broadcast
+    recipient: str
     topic: str
     body: dict[str, Any] = field(default_factory=dict)
     thread: str | None = None

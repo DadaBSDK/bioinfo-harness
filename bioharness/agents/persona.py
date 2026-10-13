@@ -17,7 +17,6 @@ TEMPERAMENTS = [
     "sardonic", "earnest and slightly intense", "unflappable", "conspiratorial",
     "world-weary but kind",
 ]
-# Second person: each entry follows "You ..." in the prompt.
 SPEECH = [
     "keep your sentences short and skip the filler",
     "go off on tangents that eventually land somewhere useful",
@@ -37,7 +36,6 @@ INTERESTS = [
     "vinyl records nobody else likes", "long-distance running", "amateur radio",
     "a cat with a medical condition", "learning Portuguese, badly",
 ]
-# Each peeve refers to something in `lab.ROOMS`.
 PEEVES = [
     "people who leave the -80 door ajar", "undocumented shell scripts",
     "meetings that could have been a message", "the printer jamming on every figure",
@@ -45,7 +43,6 @@ PEEVES = [
     "the coffee rota being ignored", "reviewers who ask for one more experiment",
     "spreadsheets used as databases", "the UPS beeping through every storm",
 ]
-# Haunts come from `lab.landmarks`, so agents only mention real places.
 
 
 def _picks(name: str, salt: str = "") -> list[int]:
@@ -68,10 +65,8 @@ def make(name: str, role: str = "") -> dict[str, Any]:
         "speech": _pick(name, "speech", SPEECH),
         "interest": _pick(name, "interest", INTERESTS),
         "peeve": _pick(name, "peeve", PEEVES),
-        # A landmark in the agent's own room.
         "haunt": _pick(name, "haunt", lab.landmarks(role)),
         "room": lab.room_for(role)["label"],
-        # Likelihood of starting small talk unprompted.
         "chattiness": round(0.25 + (_picks(name, "chat")[0] % 60) / 100, 2),
     }
 
@@ -115,8 +110,6 @@ def prompt(name: str, p: dict[str, Any]) -> str:
     ])
 
 
-# -- lines for an agent with no LLM behind it ------------------------------
-# Canned lines so deterministic agents still have a voice.
 def canned_greeting(name: str, p: dict[str, Any], newcomer: str, role: str) -> str:
     n = _picks(name + newcomer, "greet")
     openers = [

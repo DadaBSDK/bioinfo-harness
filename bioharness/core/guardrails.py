@@ -130,7 +130,7 @@ class Guardrails:
         Returns (allowed, reason) rather than raising, so a refusal is recorded like
         any other step outcome.
         """
-        if actor is None:                      # a human at the CLI
+        if actor is None:
             return True, ""
         name = str(actor.get("name", "?"))
         declared = Autonomy(actor.get("autonomy") or Autonomy.BOUNDED)
@@ -173,10 +173,10 @@ class Guardrails:
 class Autonomy(str, Enum):
     """How much rope an agent gets before a human is asked."""
 
-    READ_ONLY = "read_only"    # may plan and inspect, never execute
-    SUGGEST = "suggest"        # proposes tasks, human approves each
-    BOUNDED = "bounded"        # runs freely inside its declared scope
-    FULL = "full"              # runs anything registered
+    READ_ONLY = "read_only"
+    SUGGEST = "suggest"
+    BOUNDED = "bounded"
+    FULL = "full"
 
 
 @dataclass

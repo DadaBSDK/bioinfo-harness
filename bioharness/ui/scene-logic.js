@@ -1,5 +1,4 @@
-// 3D adaptation of the distance-timed message arcs in Munder Difflin's
-// MessageEnvelope.ts (MIT, Chaitanya Giri). See vendor/MUNDER-LICENSE.txt.
+// Message arc timing adapted from Munder Difflin's MessageEnvelope.ts (MIT, Chaitanya Giri). See vendor/MUNDER-LICENSE.txt.
 export function messagePose(start, end, elapsed) {
   const duration = Math.min(2, Math.max(.8, Math.hypot(end.x-start.x,end.z-start.z)/7.2));
   const t = Math.min(1, Math.max(0, elapsed/duration));
@@ -11,7 +10,6 @@ export function messagePose(start, end, elapsed) {
     opacity:t<1 ? 1 : Math.max(0,1-burst), done:burst>=1};
 }
 
-// New events from the last 15 s, deduplicated across refreshes; the seen-set is capped at 1000.
 export function freshTraffic(traffic, seen, now) {
   const fresh=[];
   for(const event of traffic || []) {

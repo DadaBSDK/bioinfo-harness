@@ -35,7 +35,6 @@ def order(ctx: AgentContext, to: str, text: str):
     return ctx.hive.send("human", to, "directive", {"order": text})
 
 
-# -- the operator is not ignorable ----------------------------------------
 def test_an_order_reaches_a_role_that_subscribes_to_nothing_like_it(ctx: AgentContext):
     """A scribe subscribes to `report`. An order is still an order."""
     ctx.hive.enroll("quill", "scribe")
@@ -69,7 +68,6 @@ def test_the_operator_is_read_before_the_gossip(ctx: AgentContext):
     ctx.hive.send("quill", "iris", "smalltalk", {"line": "kettle's broken"})
     order(ctx, "iris", "Check the reads for run 12")
     iris.tick()
-    # Both messages were answered, the order first.
     assert "Check the reads" in provider.prompts[0]
 
 
@@ -95,7 +93,6 @@ def test_a_pi_acts_on_an_order_as_well_as_answering_it(ctx: AgentContext):
     assert verdicts and verdicts[0].body["acted"]["dispatched"]
 
 
-# -- threading -------------------------------------------------------------
 def test_everything_said_in_answer_stays_in_the_orders_thread(ctx: AgentContext):
     ctx.hive.enroll("iris", "curator")
     iris = Curator("iris", ctx, provider=JSONProvider(
@@ -113,7 +110,6 @@ def test_a_message_that_answers_nothing_starts_its_own_thread(ctx: AgentContext)
     assert msg.thread == msg.id
 
 
-# -- the brief -------------------------------------------------------------
 def _brief_for(ctx: AgentContext, text: str = "Assess the new run") -> dict:
     ctx.hive.enroll("iris", "curator")
     ctx.hive.enroll("vera", "validator")
@@ -161,7 +157,6 @@ def test_orders_lists_what_the_operator_asked_for(ctx: AgentContext):
     assert [o["order"] for o in brief_mod.orders(ctx.hive)] == ["first", "second"]
 
 
-# -- the pdf writer --------------------------------------------------------
 def test_typographic_punctuation_survives_as_something_readable():
     assert latin("mean — quality ‘24’ … 30 %") == "mean - quality '24' ... 30 %"
 

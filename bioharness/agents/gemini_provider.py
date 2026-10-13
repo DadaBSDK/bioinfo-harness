@@ -49,7 +49,6 @@ def _request(url: str, payload: dict[str, Any] | None, timeout: float,
         return json.loads(r.read())
 
 
-# Retry overload and rate limiting; fail fast on bad key or missing model.
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -112,7 +111,6 @@ class GeminiProvider:
 
     def refresh(self) -> list[str]:
         self._models = available_models()
-        # No model given: use the first one the key can access.
         if not self.model and self._models:
             preferred = ([m for m in self._models if m == "gemini-flash-latest"]
                          or [m for m in self._models if "flash" in m and "lite" not in m]
@@ -171,7 +169,6 @@ class GeminiProvider:
                 data = self._call(url, payload, key)
                 break
             except ProviderUnavailable as exc:
-                # Retry transient overload.
                 if not exc.retryable or attempt == self.retries:
                     raise
                 time.sleep(min(8.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.4))
@@ -193,8 +190,6 @@ class GeminiProvider:
                 f"Gemini stopped without output (finishReason: {first['finishReason']})")
 
         usage = data.get("usageMetadata") or {}
-        # Count thinking tokens as output; Gemini reports them separately and they
-        # usually dominate.
         generated = (int(usage.get("candidatesTokenCount") or 0)
                      + int(usage.get("thoughtsTokenCount") or 0))
         return LLMReply(
@@ -203,7 +198,6 @@ class GeminiProvider:
             seconds=time.time() - started,
             tokens_in=int(usage.get("promptTokenCount") or 0),
             tokens_out=generated,
-            # No verified Gemini price table, so cost is recorded as zero.
             usd=0.0,
         )
 
@@ -224,7 +218,7 @@ def warm_models() -> None:
     def run() -> None:
         try:
             available_models(refresh=True)
-        except Exception:  # noqa: BLE001 - warm-up is best effort
+        except Exception:
             pass
         finally:
             _CACHE["warming"] = False

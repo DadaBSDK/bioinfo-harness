@@ -39,7 +39,6 @@ class Dashboard:
         self.hive_root = Path(hive_root).expanduser().resolve()
         self.capability_paths = [Path(p).expanduser() for p in capabilities]
 
-    # -- registry ----------------------------------------------------------
     def registry(self) -> Registry:
         reg = Registry()
         for p in self.capability_paths:
@@ -65,7 +64,6 @@ class Dashboard:
             })
         return out
 
-    # -- hive --------------------------------------------------------------
     def hive(self) -> Hive:
         return Hive(self.hive_root)
 
@@ -89,7 +87,6 @@ class Dashboard:
             "palace": hive.palace.stats(),
         }
 
-    # Status is derived from mail and recent events, never stored.
     WORKING_WINDOW_S = 25.0
 
     def floor_state(self) -> dict[str, Any]:
@@ -131,7 +128,6 @@ class Dashboard:
 
         runs = self.run_list()
         current = runs[0] if runs else None
-        # Speech bubbles only need the line, not the full message body.
         chatter = [{k: v for k, v in c.items() if k != "body"}
                    for c in self.conversation(limit=40)][-25:]
         return {
@@ -182,7 +178,6 @@ class Dashboard:
         ollama = OllamaProvider()
         gem = GeminiProvider()
         agy = AntigravityProvider()
-        # Serve cached models and refresh in the background; discovery is slow.
         gem_mod.warm_models()
         agy_mod.warm_models()
         gem_models = gem_mod.peek_models() or []
@@ -264,7 +259,6 @@ class Dashboard:
         if any(a["name"] == name for a in hive.roster()):
             return {"ok": False, "error": f"{name!r} is already on the roster"}
 
-        # Models apply only to the API provider; clear them for other providers.
         model = model if provider in ("claude-api", "gemini-api", "ollama",
                                       "antigravity") else ""
         identity = hive.enroll(name, role, provider=provider, model=model,
@@ -296,7 +290,6 @@ class Dashboard:
         missing = [n for n in names if n not in roster]
         changed = []
         for name in targets:
-            # The operator is not a worker; skip it.
             if roster[name].get("role") == "operator":
                 continue
             if hive.retarget(name, provider=provider,
@@ -315,8 +308,6 @@ class Dashboard:
             return {"ok": True, "dismissed": name}
         return {"ok": False, "error": f"no agent named {name!r}"}
 
-    # Queue a human message. The recipient must be enrolled and the topic
-    # allowed.
     ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
                       "qc.check", "analyze", "report", "peer.ask",
                       "smalltalk", "greet", "run.request", "directive")
@@ -330,7 +321,6 @@ class Dashboard:
     def send_message(self, to: str, topic: str, body: dict[str, Any]) -> dict[str, Any]:
         hive = self.hive()
         names = {a["name"] for a in hive.roster()}
-        # "*" broadcasts to the whole lab.
         if to != "*" and to not in names:
             return {"ok": False, "error": f"no agent named {to!r}; enrolled: {sorted(names)}"}
         if to == "*" and not (names - {"human"}):
@@ -344,17 +334,14 @@ class Dashboard:
             body = {**body, "order": body.get("line") or body.get("note")
                     or body.get("goal", "")}
         if topic in ("smalltalk", "greet") and "line" not in body:
-            # The composer posts free text; these topics expect `line`.
             body = {**body, "line": body.get("note") or body.get("goal", ""),
                     "hops": 0}
-        # Operator messages start a new thread; replies stay in it for the brief.
         msg = hive.send("human", to, topic, body)
         hive.event("message.queued_by_human", {"to": to, "topic": topic,
                                                "id": msg.id, "thread": msg.thread})
         return {"ok": True, "id": msg.id, "to": to, "topic": topic,
                 "thread": msg.thread}
 
-    # -- briefs ------------------------------------------------------------
     @property
     def brief_dir(self) -> Path:
         return self.runs / "briefs"
@@ -374,7 +361,6 @@ class Dashboard:
             return None
         pdf = self.brief_dir / f"brief-{thread}.pdf"
         if not pdf.is_file():
-            # Render the PDF on demand if it is not on disk yet.
             brief = gather(self.hive(), thread)
             if not brief:
                 return None
@@ -384,7 +370,6 @@ class Dashboard:
     def recall(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.hive().palace.search(query, limit=limit) if query else []
 
-    # -- runs --------------------------------------------------------------
     def run_list(self) -> list[dict[str, Any]]:
         out = []
         for manifest in Workspace.list_runs(self.runs):
@@ -421,7 +406,6 @@ class Dashboard:
                     except json.JSONDecodeError:
                         continue
 
-        # Task state: summary.json when finished, the live ledger while running.
         tasks = {t["step"]: t for t in summary.get("tasks", [])}
         for entry in ledger:
             if not entry["event"].startswith("task."):
@@ -503,11 +487,10 @@ class Handler(BaseHTTPRequestHandler):
         self.dash = dashboard
         super().__init__(*args, **kw)
 
-    # Suppress per-request logging.
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
 
-    def do_GET(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def do_GET(self) -> None:
         parsed = urlparse(self.path)
         route = unquote(parsed.path)
         query = parse_qs(parsed.query)
@@ -518,7 +501,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._static(route)
         except BrokenPipeError:
             pass
-        except Exception as exc:  # noqa: BLE001 - never crash the handler
+        except Exception as exc:
             self._send_json({"error": str(exc)}, status=500)
 
     def _api(self, route: str, query: dict[str, list[str]]) -> None:
@@ -560,7 +543,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(detail)
         self._send_json({"error": f"no such endpoint: {route}"}, status=404)
 
-    def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
+    def do_POST(self) -> None:
         parsed = urlparse(self.path)
         route = parsed.path
         if route not in ("/api/message", "/api/staff/hire", "/api/staff/fire",
@@ -590,7 +573,7 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             result = self._dispatch_post(route, payload)
-        except Exception as exc:  # report write failures as JSON
+        except Exception as exc:
             return self._send_json({"ok": False, "error": str(exc)}, status=500)
         return self._send_json(result, status=200 if result.get("ok") else 400)
 
