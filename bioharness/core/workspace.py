@@ -1,7 +1,6 @@
 """Isolated run workspaces + a provenance ledger.
 
-Munder Difflin gives each clone its own git worktree. The bioinformatics
-equivalent is a per-run, per-step directory tree that nothing else writes to,
+Every run gets a per-run, per-step directory tree that nothing else writes to,
 plus an append-only record of exactly what produced every file.
 """
 from __future__ import annotations

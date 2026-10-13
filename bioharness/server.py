@@ -137,6 +137,7 @@ class Dashboard:
         chatter = [{k: v for k, v in c.items() if k != "body"}
                    for c in self.conversation(limit=40)][-25:]
         return {
+            "lab_name": hive.lab_name(),
             "agents": agents,
             "traffic": traffic,
             "chatter": chatter,
@@ -324,6 +325,12 @@ class Dashboard:
     ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
                       "qc.check", "analyze", "report", "peer.ask",
                       "smalltalk", "greet", "run.request", "directive")
+
+    def rename_lab(self, name: str) -> dict[str, Any]:
+        try:
+            return {"ok": True, "name": self.hive().set_lab_name(name)}
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
 
     def send_message(self, to: str, topic: str, body: dict[str, Any]) -> dict[str, Any]:
         hive = self.hive()
@@ -567,7 +574,7 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         route = parsed.path
         if route not in ("/api/message", "/api/staff/hire", "/api/staff/fire",
-                         "/api/staff/assign"):
+                         "/api/staff/assign", "/api/lab"):
             return self._send_json({"error": "no such endpoint"}, status=404)
         try:
             length = int(self.headers.get("Content-Length", "0"))
@@ -616,6 +623,8 @@ class Handler(BaseHTTPRequestHandler):
                 model=str(payload.get("model", "")),
                 autonomy=str(payload.get("autonomy", "")),
                 scope=payload.get("scope"))
+        elif route == "/api/lab":
+            result = self.dash.rename_lab(str(payload.get("name", "")))
         else:
             result = self.dash.fire(str(payload.get("name", "")))
         return result

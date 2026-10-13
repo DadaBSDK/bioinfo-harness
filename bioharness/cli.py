@@ -419,7 +419,15 @@ def cmd_ui(args: argparse.Namespace) -> int:
     from .server import Dashboard, serve
     dash = Dashboard(runs=Path(args.runs), hive_root=Path(args.hive),
                      capabilities=[Path(p) for p in args.capabilities])
+    hive = dash.hive()
+    if args.lab_name is not None:
+        try:
+            hive.set_lab_name(args.lab_name)
+        except ValueError as exc:
+            print(color(f"--lab-name: {exc}", "red"), file=sys.stderr)
+            return 2
     print(color("Bioinfo Harness dashboard", "bold"))
+    print(f"  lab  {hive.lab_name()}")
     print(f"  runs {dash.runs}")
     print(f"  hive {dash.hive_root}")
     if args.attend:
@@ -742,6 +750,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="loopback by default; the dashboard is read-only either way")
     c.add_argument("--no-open", action="store_true", help="do not open a browser")
     c.add_argument("--only", nargs="+", help="with --attend: only run these named agents")
+    c.add_argument("--lab-name", metavar="NAME",
+                   help="name your lab; it is saved in the hive and can also be "
+                        "changed from the dashboard")
     c.set_defaults(func=cmd_ui)
 
     c = sub.add_parser("staff", help="hire, list or dismiss agents")

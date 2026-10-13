@@ -77,5 +77,11 @@ def test_the_map_forbids_inventing_rooms(ctx: AgentContext):
     assert "no third floor" in lab.map_prompt("curator")
 
 
+def test_agents_are_told_the_name_of_their_lab(ctx: AgentContext):
+    ctx.hive.set_lab_name("Kim Lab")
+    assert lab.map_prompt("curator", "Kim Lab").startswith("# Kim Lab")
+    assert "Kim Lab" in Curator("iris", ctx).system_prompt
+
+
 def test_whereabouts_is_empty_for_a_lab_of_one(ctx: AgentContext):
     assert lab.whereabouts([{"name": "iris", "role": "curator"}], me="iris") == ""

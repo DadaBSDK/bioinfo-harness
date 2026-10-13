@@ -1,13 +1,11 @@
 # Bioinfo Harness
 
-A pluggable multi-agent harness for bioinformatics — inspired by
-[Munder Difflin](https://munderdiffl.in/), rebuilt around scientific pipelines
-instead of a code repository.
+A pluggable multi-agent harness for bioinformatics, built around scientific
+pipelines.
 
-Munder Difflin wraps agent CLIs as per-person "clone" nodes that share a memory
-palace, talk over file mailboxes, and run inside isolated git worktrees. The
-same shape works for a lab, with one substitution: **the substrate is not a repo,
-it is a capability registry**. Any tool becomes available to the agents by
+Agent CLIs are wrapped as named lab members who share a memory palace, talk over
+file mailboxes, and work inside isolated run workspaces. **The substrate is a
+capability registry**: any tool becomes available to the agents by
 dropping a YAML manifest into `capabilities/` — an NGS aligner, an MD engine, a
 docking program, a Python function. The core knows about ports, types, runtimes,
 budgets and provenance. It never knows about a specific tool.
@@ -24,17 +22,6 @@ budgets and provenance. It never knows about a specific tool.
             fastqc, fastp     pdb_fetch, gmx      multiqc, metrics
             bwa, bcftools     vina, MDAnalysis
 ```
-
-## Why this shape
-
-| Munder Difflin | Bioinfo Harness |
-|---|---|
-| Clone node wrapping an agent CLI | Role agent wrapping an agent CLI *or* a deterministic function |
-| Isolated git worktree | Isolated run workspace + hashed provenance ledger |
-| MemPalace shared memory | Markdown per-agent memory, mined into an FTS index |
-| Atomic-file mailboxes, single committer | Same — the orchestrator is the only executor |
-| Circuit breaker, token budgets | Budgets, breakers, and a steer → constrain → stop ladder |
-| Repo as substrate | **Capability registry as substrate** |
 
 ## Install
 
@@ -727,6 +714,16 @@ selection, and doorway routing remain connected to the scene.
   `F` for fullscreen, `Home` to reset, `+`/`-` to zoom, `Escape` to clear selection.
 - Turn **3D Lab** off for the original 2D floor. Unsupported WebGL browsers fall
   back automatically. No internet connection or frontend build is needed at runtime.
+
+The lab is called **Voxel Lab** until you name it. Click the name above the scene
+to rename it, or set it at launch:
+
+```sh
+bioharness ui --lab-name "Kim Lab"
+```
+
+The name is saved in the hive (`lab.json`), shown in the 3D view and the browser
+tab, and given to the agents, so they know which lab they work in.
 
 The generated asset pack is in `bioharness/ui/assets/voxel/`: 22 portable `.glb`
 models, 15 pixel textures, and a model catalog. Rebuild it with

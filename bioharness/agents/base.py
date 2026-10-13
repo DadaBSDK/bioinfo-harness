@@ -1,6 +1,6 @@
 """Agent base class and CLI provider wrapping.
 
-Like Munder Difflin, the harness does not reimplement agents -- it wraps the
+The harness does not reimplement agents -- it wraps the
 CLI you already pay for (claude, codex, gemini, ...) as a subprocess with its
 own working directory and identity. An agent may equally be backed by a plain
 Python function; the orchestrator cannot tell the difference and should not.
@@ -201,7 +201,7 @@ class Agent:
             self.system_prompt.strip(),
             persona_mod.prompt(name, self.persona),
             OPERATOR_AUTHORITY,
-            lab.map_prompt(self.role),
+            lab.map_prompt(self.role, self.hive.lab_name()),
             lab.whereabouts(self.hive.roster(), me=name)]))
 
     # -- conveniences ------------------------------------------------------

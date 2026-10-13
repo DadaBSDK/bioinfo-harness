@@ -104,10 +104,11 @@ def landmarks(role: str = "") -> list[str]:
         [i for room in ROOMS for i in room["instruments"]]
 
 
-def map_prompt(role: str = "") -> str:
+def map_prompt(role: str = "", name: str = "") -> str:
     """The floor plan, as an agent sees it."""
-    lines = ["# The lab",
-             "This is the whole building. It has these rooms and nothing else:"]
+    lines = [f"# {name}" if name else "# The lab",
+             (f"This is the whole building, {name}. " if name else "This is the whole building. ")
+             + "It has these rooms and nothing else:"]
     for room in ROOMS:
         who = ", ".join(room["roles"]) or "nobody"
         lines.append(f"- **{room['label']}** ({who}): "

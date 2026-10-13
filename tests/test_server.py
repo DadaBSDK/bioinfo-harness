@@ -258,6 +258,33 @@ def test_malformed_json_is_refused(live):
     assert exc.value.code == 400
 
 
+def test_lab_is_called_voxel_lab_until_named(live):
+    _, base, _ = live
+    assert get(base, "/api/floor")["lab_name"] == "Voxel Lab"
+
+
+def test_renaming_the_lab_persists_in_the_hive(live):
+    dash, base, _ = live
+    status, body = post(base, "/api/lab", {"name": "  Kim   Lab "})
+    assert status == 200 and body == {"ok": True, "name": "Kim Lab"}
+    assert get(base, "/api/floor")["lab_name"] == "Kim Lab"
+    assert Hive(dash.hive_root).lab_name() == "Kim Lab"
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 61])
+def test_unusable_lab_names_are_refused(live, name):
+    dash, base, _ = live
+    status, body = post(base, "/api/lab", {"name": name})
+    assert status == 400 and body["ok"] is False
+    assert dash.hive().lab_name() == "Voxel Lab"
+
+
+def test_lab_name_must_be_a_string(live):
+    _, base, _ = live
+    status, _ = post(base, "/api/lab", {"name": 42})
+    assert status == 400
+
+
 def test_post_to_other_endpoints_is_refused(live):
     _, base, _ = live
     status, _ = post(base, "/api/runs", {})

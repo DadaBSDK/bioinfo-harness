@@ -802,13 +802,53 @@ function paintBubbles(svg) {
   layer.innerHTML = parts.join('');
 }
 
+// The lab is called whatever the operator named it; until then, Voxel Lab.
+function labName() {
+  return state.floor?.lab_name || 'Voxel Lab';
+}
+
+function paintLabName() {
+  const name = labName();
+  document.title = `${name} · Bioinfo Harness`;
+  const input = $('#lab-name');
+  if (input && document.activeElement !== input && input.value !== name) input.value = name;
+  const corner = $('.scene-lab-name');
+  if (corner) corner.textContent = name.toUpperCase();
+}
+
+async function renameLab(input) {
+  const name = input.value.trim().replace(/\s+/g, ' ');
+  if (!name || name === labName()) { input.value = labName(); return; }
+  const r = await api('/api/lab', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  }).catch(error => ({ ok: false, error: error.message }));
+  if (r.ok && state.floor) state.floor.lab_name = r.name;
+  else input.value = labName();
+  input.setCustomValidity(r.ok ? '' : r.error || 'Could not rename the lab');
+  if (!r.ok) input.reportValidity();
+  paintLabName();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.id !== 'lab-name') return;
+  if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+  if (e.key === 'Escape') { e.target.value = labName(); e.target.blur(); }
+});
+document.addEventListener('change', e => {
+  if (e.target.id === 'lab-name') renameLab(e.target);
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'lab-name') e.target.setCustomValidity('');
+});
+
 function renderFloor() {
   const f = state.floor;
   if (!f) return '<div class="empty">connecting…</div>';
   if (state.scene3d) return `<div class="lab3d" id="lab3d">
     <div class="scene-labels" aria-label="Lab rooms and researchers"></div>
-    <div class="scene-loading" role="status">Building your voxel lab…</div>
-    <div class="scene-corner"><span class="scene-live"></span> VOXEL LAB <span>/ LEVEL 01</span></div>
+    <div class="scene-loading" role="status">Building ${esc(labName())}…</div>
+    <div class="scene-corner"><span class="scene-live"></span> <span class="scene-lab-name">${esc(labName().toUpperCase())}</span> <span>/ LEVEL 01</span></div>
     <div class="scene-location">Explore your lab</div>
     <div class="scene-destinations" aria-label="Explore lab rooms"></div>
     <div class="scene-camera" aria-label="Camera controls">
@@ -1028,6 +1068,8 @@ function floorScaffold() {
   return `<div class="floorwrap">
     <div class="stage">
       <div class="stage-heading"><div><div class="eyebrow">WORKSPACE / LIVE LAB</div>
+        <input class="lab-name" id="lab-name" maxlength="60" spellcheck="false" autocomplete="off"
+               aria-label="Lab name" title="Click to rename your lab" value="${esc(labName())}">
         <h1>Your research, in motion.</h1><p>A shared space for your team and experiments.</p></div>
         <button class="manage-team" data-cc="staff">＋ Manage team</button></div>
       <div class="lab-stats" id="lab-stats"></div>
@@ -1069,6 +1111,7 @@ function floorScaffold() {
 
 function paintFloor() {
   syncWorld();
+  paintLabName();
   const agents = state.floor?.agents || [];
   $('#lab-stats').innerHTML = [
     ['Researchers', agents.length, 'Across seven dedicated spaces'],

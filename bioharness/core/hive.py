@@ -300,6 +300,27 @@ class Hive:
         self.palace = MemoryPalace(self.root)
         self._boxes: dict[str, Mailbox] = {}
 
+    # -- the lab itself ----------------------------------------------------
+    DEFAULT_LAB_NAME = "Voxel Lab"
+    LAB_NAME_MAX = 60
+
+    def lab_name(self) -> str:
+        try:
+            name = json.loads((self.root / "lab.json").read_text()).get("name")
+        except (OSError, json.JSONDecodeError, AttributeError):
+            name = None
+        return name.strip() if isinstance(name, str) and name.strip() else self.DEFAULT_LAB_NAME
+
+    def set_lab_name(self, name: str) -> str:
+        name = " ".join(str(name).split())
+        if not name:
+            raise ValueError("lab name must not be empty")
+        if len(name) > self.LAB_NAME_MAX:
+            raise ValueError(f"lab name must be at most {self.LAB_NAME_MAX} characters")
+        atomic_write(self.root / "lab.json", json.dumps({"name": name}, indent=2))
+        self.event("lab.renamed", {"name": name})
+        return name
+
     # -- agents ------------------------------------------------------------
     def mailbox(self, name: str) -> Mailbox:
         if name not in self._boxes:
