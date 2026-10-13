@@ -7,7 +7,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '..', 'bioharness', 'ui', 'app.js'), 'utf8');
 
 const from = src.indexOf('const TILE = 32;');
-const to = src.indexOf('// -- the world');
+const to = src.indexOf('const WORLD = {');
 if (from < 0 || to < 0) {
   console.log(JSON.stringify({ error: 'could not locate the geometry block in app.js' }));
   process.exit(2);
