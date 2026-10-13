@@ -73,6 +73,11 @@ class Mailbox:
              thread: str | None = None) -> Message:
         msg = Message(id=new_id("msg"), sender=self.name, recipient=recipient,
                       topic=topic, body=body, thread=thread)
+        # A message that answers nothing starts a thread of its own. That is
+        # what makes an order from the operator addressable afterwards: the
+        # whole exchange it caused shares its id.
+        if msg.thread is None:
+            msg.thread = msg.id
         atomic_write(self.outbox / f"{msg.ts:.6f}-{msg.id}.json",
                      json.dumps(_msg_dict(msg), indent=2, default=str))
         return msg
@@ -504,8 +509,9 @@ class Hive:
         return delivered
 
     def send(self, sender: str, recipient: str, topic: str,
-             body: dict[str, Any], deliver: bool = True) -> Message:
-        msg = self.mailbox(sender).send(recipient, topic, body)
+             body: dict[str, Any], deliver: bool = True,
+             thread: str | None = None) -> Message:
+        msg = self.mailbox(sender).send(recipient, topic, body, thread=thread)
         if deliver:
             self.route()
         return msg

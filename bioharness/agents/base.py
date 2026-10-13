@@ -109,6 +109,19 @@ def _estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
+OPERATOR_AUTHORITY = """# Who you answer to
+The human operator runs this lab. Their word outranks your own preferences,
+another agent's opinion, and your reading of your job description. When they
+give an order you carry out your part of it and say what you will do -- you do
+not argue about whose remit it is, and you do not go quiet.
+
+Two things an order cannot make you do, because they would make you useless to
+the person giving it: state something as fact that the data does not show, and
+pretend a check passed when it did not. If an order runs into one of those, say
+'cannot do', name the exact obstacle, and offer the nearest thing you can
+honestly do instead. That is obedience, not refusal."""
+
+
 @dataclass
 class AgentContext:
     """Everything an agent is allowed to touch."""
@@ -143,6 +156,21 @@ class Agent:
     # Talk that is not about the work. Handled here too: being a colleague is
     # not one role's job.
     SOCIAL_TOPICS = ("greet", "greet.reply", "smalltalk")
+    # An order from the operator, and the answer every agent owes it.
+    DIRECTIVE = "directive"
+    VERDICT = "verdict"
+    OPERATOR = "human"
+    VERDICT_CHOICES = ("will do", "will do with caveats", "cannot do")
+    VERDICT_SCHEMA: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": list(VERDICT_CHOICES)},
+            "position": {"type": "string"},
+            "needs": {"type": "array", "items": {"type": "string"}},
+            "risk": {"type": "string"},
+        },
+        "required": ["verdict", "position"],
+    }
     # How many turns a chat about nothing may run before it peters out, the way
     # a real one does when someone's run finishes.
     SOCIAL_HOPS = 2
@@ -165,12 +193,14 @@ class Agent:
                          provider=(provider.name if provider else "builtin"),
                          autonomy=self.autonomy.value)
         self.persona = self.hive.ensure_persona(name, persona_mod.make)
+        self._thread: str | None = None
         # The role says what this agent does, the persona says who is doing it,
         # and the map says where everyone is -- without which agents address
         # each other by room, and invent rooms that are not there.
         self.system_prompt = "\n\n".join(filter(None, [
             self.system_prompt.strip(),
             persona_mod.prompt(name, self.persona),
+            OPERATOR_AUTHORITY,
             lab.map_prompt(self.role),
             lab.whereabouts(self.hive.roster(), me=name)]))
 
@@ -184,7 +214,9 @@ class Agent:
         return self.hive.mailbox(self.name)
 
     def send(self, recipient: str, topic: str, **body: Any) -> Message:
-        return self.hive.send(self.name, recipient, topic, body)
+        # Everything said in answer to an order stays in that order's thread,
+        # which is what lets the brief collect a whole exchange afterwards.
+        return self.hive.send(self.name, recipient, topic, body, thread=self._thread)
 
     def actor(self) -> dict[str, Any]:
         """What the guardrails need in order to decide if this agent may execute.
@@ -438,6 +470,71 @@ class Agent:
         self.send(msg.sender, "smalltalk", line=reply, hops=hops + 1)
         return None
 
+    # -- orders from the operator -----------------------------------------
+    def act_on_directive(self, order: str, msg: Message) -> dict[str, Any] | None:
+        """What this role actually *does* about an order, beyond answering.
+
+        The base agent only answers; the PI overrides this to put the lab to
+        work. Anything returned is recorded in the verdict as `acted`.
+        """
+        return None
+
+    def handle_directive(self, msg: Message) -> None:
+        """Give the operator a verdict, and do this role's part of the order."""
+        order = str(msg.body.get("order") or msg.body.get("goal")
+                    or msg.body.get("question") or msg.body.get("line")
+                    or msg.body.get("note") or "").strip()
+        acted = None
+        try:
+            acted = self.act_on_directive(order, msg)
+        except Exception as exc:  # noqa: BLE001 - a failure to act is a verdict too
+            self.hive.event("agent.error", {"agent": self.name, "topic": msg.topic,
+                                            "error": repr(exc)})
+            acted = {"error": str(exc)}
+        verdict = self.verdict_on(order, acted)
+        self.remember(f"Order from {msg.sender}: {order}\n\n"
+                      f"My verdict: {verdict['verdict']} -- {verdict['position'][:800]}",
+                      heading="order")
+        self.send(msg.sender, self.VERDICT, order=order, role=self.role,
+                  acted=acted, **verdict)
+
+    def verdict_on(self, order: str, acted: Any = None) -> dict[str, Any]:
+        """This agent's position on an order, structured for the brief."""
+        if self.provider is None:
+            return {"verdict": "will do",
+                    "position": (f"Standing by as {self.role}. No model is "
+                                 f"configured for me, so this is the "
+                                 f"deterministic answer: I will do my part when "
+                                 f"the inputs reach me."),
+                    "needs": [], "risk": ""}
+        fallback = {"verdict": "will do with caveats",
+                    "position": "(no structured answer came back)",
+                    "needs": [], "risk": ""}
+        try:
+            answer = self.think_json(
+                f"The operator has given the lab this order:\n\n{order}\n\n"
+                f"Answer as yourself, in your own role. `verdict` is one of "
+                f"{', '.join(self.VERDICT_CHOICES)}. `position` is what you will "
+                f"do about it in one short paragraph -- concrete, no job "
+                f"description. `needs` is what you need from colleagues or from "
+                f"the operator. `risk` is the one thing you would flag, or empty.",
+                context=json.dumps({"already_done": acted}, default=str)[:3000]
+                if acted else "",
+                fallback=fallback, schema=self.VERDICT_SCHEMA)
+        except (ProviderUnavailable, ValueError) as exc:
+            return {"verdict": "cannot do",
+                    "position": f"My provider is unavailable: {exc}",
+                    "needs": [], "risk": "no model behind this agent right now"}
+        if not isinstance(answer, dict):
+            return fallback
+        verdict = str(answer.get("verdict", "")).strip().lower()
+        if verdict not in self.VERDICT_CHOICES:
+            verdict = "will do with caveats"
+        return {"verdict": verdict,
+                "position": str(answer.get("position", "")).strip() or fallback["position"],
+                "needs": [str(n) for n in (answer.get("needs") or [])][:6],
+                "risk": str(answer.get("risk", "")).strip()}
+
     # -- loop --------------------------------------------------------------
     def handle(self, msg: Message) -> dict[str, Any] | None:
         raise NotImplementedError
@@ -446,18 +543,30 @@ class Agent:
         """Process one batch of inbox messages. Returns how many were handled."""
         rails = self.ctx.guardrails
         handled = 0
-        for msg in self.mailbox.read(consume=True):
+        # The operator's mail is read first. An order should not wait behind a
+        # conversation about the coffee rota.
+        inbox = sorted(self.mailbox.read(consume=True),
+                       key=lambda m: (m.sender != self.OPERATOR, m.ts))
+        for msg in inbox:
             # Peer and social topics bypass `subscribes`: a role subscribes to
             # the work it does, but anyone may be asked a question or said hello
-            # to.
+            # to. So does anything the operator sends -- an order dropped for
+            # being off-topic is exactly "they don't listen".
             peer = msg.topic in self.PEER_TOPICS
             social = msg.topic in self.SOCIAL_TOPICS
-            if not (peer or social) and self.subscribes != ("*",) \
-                    and msg.topic not in self.subscribes:
+            from_operator = msg.sender == self.OPERATOR
+            directive = msg.topic == self.DIRECTIVE or (
+                from_operator and not peer and not social
+                and msg.topic not in self.subscribes and self.subscribes != ("*",))
+            if not (peer or social or directive or from_operator) \
+                    and self.subscribes != ("*",) and msg.topic not in self.subscribes:
                 continue
+            self._thread = msg.thread or msg.id
             try:
                 rails.budget.check()
-                if peer:
+                if directive:
+                    result = self.handle_directive(msg)
+                elif peer:
                     result = self.handle_peer(msg)
                 elif social:
                     result = self.handle_social(msg)
@@ -478,6 +587,7 @@ class Agent:
             # no such topic, and reads as traffic that means nothing.
             if result is not None and not msg.topic.endswith(".result"):
                 self.send(msg.sender, f"{msg.topic}.result", **result)
+            self._thread = None
         return handled
 
     def __repr__(self) -> str:

@@ -190,3 +190,138 @@ def test_a_runner_accepts_a_parameter_supplied_with_the_request(ctx: AgentContex
     result = rex.handle(ctx.hive.mailbox("hugo").send(
         "rex", "run.request", {"workflow": plan, "params": {"reads": "/tmp/x.fastq"}}))
     assert result["ok"] is True
+
+
+# -- the order that produced seven essays and no work ----------------------
+def test_a_fetch_goal_plans_a_fetch_step(registry: Registry, tmp_path: Path):
+    """"Fetch the data online and run it" was unroutable: the type graph began
+    at a fastq file somebody had already downloaded by hand."""
+    from bioharness.agents.roles import Planner, source_for
+    from bioharness.core.registry import Registry as Reg
+    reg = Reg()
+    reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
+    assert source_for(reg, "fastq", "ngs") == "ena_fetch"
+
+    ctx = AgentContext(hive=Hive(tmp_path / "hive"), registry=reg,
+                       guardrails=Guardrails(), workdir=tmp_path / "agents",
+                       runs=tmp_path / "runs")
+    ada = Planner("ada", ctx)
+    result = ada.handle(ctx.hive.mailbox("hugo").send("ada", "plan.request", {
+        "goal": "fetch the banana salinity reads online and call variants",
+        "start_type": "fastq", "goal_type": "vcf", "domain": "ngs"}))
+    steps = [s["capability"] for s in result["workflow"]["steps"]]
+    assert steps[0] == "ena_fetch", steps
+    # And the accession it needs is a visible parameter, not a default of "".
+    assert "accession" in result["workflow"]["params"]
+
+
+def test_a_plan_with_holes_asks_the_operator_not_the_room(ctx: AgentContext):
+    ctx.hive.enroll("human", "operator")
+    ctx.hive.enroll("iris", "curator")
+    ctx.hive.enroll("rex", "runner")
+    hugo = PI("hugo", ctx)
+    hugo.handle(ctx.hive.mailbox("ada").send("hugo", "plan.request.result", {
+        "ok": True, "workflow": {"name": "fetch-and-call", "params":
+                                 {"accession": None, "reference": None},
+                                 "steps": [{"id": "ena_fetch",
+                                            "capability": "ena_fetch"}]}}))
+    ctx.hive.route()
+    asked = ctx.hive.mailbox("human").peek()
+    assert [m.topic for m in asked] == ["needs"]
+    assert asked[0].body["needs"] == ["accession", "reference"]
+    # Nobody else was pulled into a conversation about it.
+    assert ctx.hive.mailbox("iris").peek() == []
+    assert ctx.hive.mailbox("rex").peek() == []
+
+
+def test_an_order_does_not_ask_idle_agents_for_their_opinion_twice(ctx: AgentContext):
+    """Every agent already owes an order a verdict; asking six of them the same
+    question again bought seven essays and no work."""
+    for name, role in (("ada", "planner"), ("iris", "curator"),
+                       ("nova", "analyst"), ("quill", "scribe")):
+        ctx.hive.enroll(name, role)
+    hugo = PI("hugo", ctx)
+    hugo.act_on_directive("assess the new run", ctx.hive.mailbox("human").send(
+        "hugo", "directive", {"order": "assess the new run"}))
+    ctx.hive.route()
+    assert [m.topic for m in ctx.hive.mailbox("ada").peek()] == ["plan.request"]
+    for idle in ("iris", "nova", "quill"):
+        assert ctx.hive.mailbox(idle).peek() == [], f"{idle} was asked to chat"
+
+
+def test_a_runner_refuses_a_fetch_with_no_accession(tmp_path: Path):
+    """It ran with an empty accession, contacted ENA, and failed inside the step
+    -- which reads as a broken tool rather than a question nobody answered."""
+    from bioharness.core.registry import Registry as Reg
+    reg = Reg()
+    reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
+    ctx = AgentContext(hive=Hive(tmp_path / "hive"), registry=reg,
+                       guardrails=Guardrails(), workdir=tmp_path / "agents",
+                       runs=tmp_path / "runs")
+    ctx.hive.enroll("rex", "runner", autonomy="full")
+    rex = Runner("rex", ctx)
+    plan = {"name": "fetch-and-call", "steps": [
+        {"id": "fetch", "capability": "ena_fetch"},
+        {"id": "ref", "capability": "ref_fetch"}]}
+    result = rex.handle(ctx.hive.mailbox("hugo").send(
+        "rex", "run.request", {"workflow": plan}))
+    assert result["ok"] is False
+    assert set(result["needs"]) == {"accession", "url"}
+
+
+def test_a_runner_accepts_a_fetch_once_the_accession_is_given(tmp_path: Path):
+    from bioharness.core.registry import Registry as Reg
+    reg = Reg()
+    reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
+    ctx = AgentContext(hive=Hive(tmp_path / "hive"), registry=reg,
+                       guardrails=Guardrails(), workdir=tmp_path / "agents",
+                       runs=tmp_path / "runs")
+    ctx.hive.enroll("rex", "runner", autonomy="full")
+    rex = Runner("rex", ctx)
+    plan = {"name": "fetch", "steps": [
+        {"id": "fetch", "capability": "ena_fetch",
+         "params": {"accession": "SRR000001", "max_reads": 4}}]}
+    # Not executed here -- only that the pre-flight check lets it through.
+    assert rex._demanded_params(plan) == set()
+
+
+def test_the_curator_is_not_asked_to_open_an_accession(tmp_path: Path):
+    """`accession=SRR000001` is not a path, and checking it as one blocked the
+    run for a missing file that was never meant to exist."""
+    from bioharness.core.registry import Registry as Reg
+    reg = Reg()
+    reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
+    ctx = AgentContext(hive=Hive(tmp_path / "hive"), registry=reg,
+                       guardrails=Guardrails(), workdir=tmp_path / "agents",
+                       runs=tmp_path / "runs")
+    ctx.hive.enroll("human", "operator")
+    ctx.hive.enroll("iris", "curator")
+    ctx.hive.enroll("rex", "runner")
+    hugo = PI("hugo", ctx)
+    ctx.hive.blackboard.put("mission/params", {"accession": "SRR000001"})
+    hugo.handle(ctx.hive.mailbox("ada").send("hugo", "plan.request.result", {
+        "ok": True, "workflow": {
+            "name": "fetch", "params": {"accession": "SRR000001",
+                                        "reads": "/data/x.fastq"},
+            "steps": [{"id": "fetch", "capability": "fastqc",
+                       "with": {"reads": "{{ params.reads }}"}}]}}))
+    ctx.hive.route()
+    sent = ctx.hive.mailbox("iris").peek()
+    assert [m.topic for m in sent] == ["data.validate"]
+    assert sent[0].body["inputs"] == {"reads": "/data/x.fastq"}
+
+
+def test_a_model_plan_that_binds_a_parameter_as_a_file_is_corrected(tmp_path: Path):
+    """The model wrote `with: {accession: ...}` on a step that declares no input
+    ports at all, and the curator was sent to open a file called SRR000001."""
+    from bioharness.agents.roles import file_params, repair_plan
+    from bioharness.core.registry import Registry as Reg
+    reg = Reg()
+    reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
+    wf = {"name": "fetch", "params": {}, "steps": [
+        {"id": "fetch_reads", "capability": "ena_fetch",
+         "with": {"accession": "{{ params.accession }}"}, "params": {}}]}
+    repair_plan(reg, wf)
+    assert wf["steps"][0]["with"] == {}
+    assert wf["steps"][0]["params"] == {"accession": "{{ params.accession }}"}
+    assert file_params(reg, wf) == set(), "an accession is not a path"

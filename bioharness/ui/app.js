@@ -1,13 +1,22 @@
 'use strict';
 
 const $ = (s, r = document) => r.querySelector(s);
+function updateHTML(element, html) {
+  if (element.dataset.rendered === html) return;
+  const scroll = element.scrollTop; element.innerHTML = html; element.dataset.rendered = html; element.scrollTop = scroll;
+}
+
 const TABS = ['floor', 'chat', 'runs', 'hive', 'caps', 'cost'];
-const CC_TABS = ['activity', 'workers', 'staff', 'memory', 'tasks', 'graph'];
+const NAV = {floor:['◈','Lab'],chat:['◌','Conversations'],runs:['▤','Runs'],hive:['⬡','Knowledge'],caps:['⊞','Tools'],cost:['◴','Usage']};
+const PANEL_NAMES = {activity:'Activity',briefs:'Briefs',workers:'Researcher',staff:'Team',memory:'Memory',tasks:'Tasks',graph:'Workflow'};
+const CC_TABS = ['activity', 'briefs', 'workers', 'staff', 'memory', 'tasks', 'graph'];
 
 const state = {
+  scene3d: true, cutaway: false, sceneError: '', voxel: true, paused: false, labels: true, refreshing: false, connected: false,
+  draft: '', recipient: '', topic: 'directive', recallQuery: '', recallHtml: '', refreshQueued: false,
   tab: 'floor', cc: 'activity', runId: null, agent: null,
   runs: [], detail: null, hive: null, caps: null, overview: null, floor: null,
-  chat: [], chatSeen: 0,
+  chat: [], chatSeen: 0, briefs: [],
   log: null, logTab: 'stderr', sent: '', sending: false,
   staffOptions: null, hireMsg: '', hiring: false,
   // Kept in state so a repaint never discards a half-filled form.
@@ -30,8 +39,11 @@ const STATUS_COLOR = { working: 'var(--run)', awaiting: 'var(--accent)',
                        blocked: 'var(--fail)', idle: 'var(--skip)' };
 
 async function api(path, options) {
-  const r = await fetch(path, { cache: 'no-store', ...options });
-  if (!r.ok && !options) throw new Error(`${path} → ${r.status}`);
+  const r = await fetch(path, { cache: 'no-store', signal: AbortSignal.timeout(15000), ...options });
+  if (!r.ok) {
+    const error = await r.json().catch(() => ({}));
+    throw new Error(error.error || `Request failed (${r.status})`);
+  }
   return r.json();
 }
 
@@ -71,50 +83,66 @@ async function loadAtlas() {
 
 // x/y/w/h describe the room's INTERIOR floor. Walls are built around it, and
 // `doorX` is the centre of the only opening.
+//
+// What stands in each room is the instrument list from `agents/lab.py`, drawn
+// with the nearest sprite the atlas has. That is the point of both files: the
+// lab an agent describes has to be the lab you can watch, down to the -80 in
+// the sequencing bay and the racks in the cold aisle.
+//
+//   wall        equipment along the back wall
+//   counter     a work surface across the room, which people stand at
+//   mid         [sprite, fx, fy] free-standing, mid-floor
+//   floorProps  [sprite, fx, fy] the front of the room, nearest the door
 const ROOMS = [
   { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 340, h: 156,
-    tile: 'floor_wood', doorSide: 'bottom', doorX: 186, roles: ['pi', 'planner'],
-    wall: ['desk_pc', 'desk_pc', 'whiteboard', 'filing_cabinet', 'clock'],
-    floorProps: [['table', 0.24, 0.86], ['chair', 0.62, 0.84], ['plant', 0.90, 0.86]] },
+    tile: 'floor_wood', counter: true, doorSide: 'bottom', doorX: 186,
+    roles: ['pi', 'planner'], accent: '#6f9fbf',
+    wall: ['whiteboard', 'desk_pc', 'desk_pc', 'filing_cabinet', 'clock'],
+    floorProps: [['plant', 0.94, 0.64]] },
 
   { id: 'seq', label: 'SEQUENCING BAY', x: 404, y: 72, w: 340, h: 156,
     tile: 'floor_tile', counter: true, doorSide: 'bottom', doorX: 574,
-    roles: ['curator'],
-    wall: ['sequencer', 'pcr', 'incubator', 'freezer', 'gel_dock'],
-    floorProps: [['sink', 0.22, 0.86], ['bench', 0.72, 0.86]] },
+    roles: ['curator'], accent: '#7fbf95',
+    wall: ['sequencer', 'pcr', 'gel_dock', 'incubator', 'freezer'],
+    floorProps: [['sink', 0.07, 0.64], ['flask_rack', 0.93, 0.64]] },
 
   { id: 'qc', label: 'QC BENCH', x: 792, y: 72, w: 340, h: 156,
     tile: 'floor_tile', counter: true, doorSide: 'bottom', doorX: 962,
-    roles: ['validator'],
-    wall: ['microscope', 'centrifuge', 'gel_dock', 'shelving', 'incubator'],
-    floorProps: [['flask_rack', 0.24, 0.86], ['bench', 0.74, 0.86]] },
+    roles: ['validator'], accent: '#e0a94a',
+    wall: ['microscope', 'centrifuge', 'gel_dock', 'incubator', 'shelving'],
+    floorProps: [['flask_rack', 0.07, 0.64], ['sink', 0.93, 0.64]] },
 
   { id: 'compute', label: 'COMPUTE CLUSTER', x: 16, y: 352, w: 340, h: 148,
     tile: 'floor_grate', doorSide: 'bottom', doorX: 186,
-    roles: ['runner', 'orchestrator'],
-    wall: ['server_rack', 'server_rack', 'server_rack', 'server_rack', 'server_rack'],
-    floorProps: [['desk_pc', 0.24, 0.88], ['printer', 0.58, 0.86], ['filing_cabinet', 0.88, 0.86]] },
+    roles: ['runner', 'orchestrator'], accent: '#9b8fd0',
+    wall: ['server_rack', 'server_rack', 'server_rack', 'server_rack', 'shelving'],
+    mid: [['server_rack', 0.12, 0.66], ['server_rack', 0.33, 0.66],
+          ['server_rack', 0.54, 0.66], ['desk_pc', 0.80, 0.68]],
+    floorProps: [] },
 
   { id: 'structure', label: 'STRUCTURE LAB', x: 404, y: 352, w: 340, h: 148,
     tile: 'floor_lino', counter: true, doorSide: 'bottom', doorX: 574,
-    roles: ['analyst'],
-    wall: ['fume_hood', 'gel_dock', 'shelving', 'incubator', 'freezer'],
-    floorProps: [['microscope', 0.24, 0.88], ['bench', 0.74, 0.88]] },
+    roles: ['analyst'], accent: '#68b7c8',
+    wall: ['desk_pc', 'desk_pc', 'whiteboard', 'shelving', 'clock'],
+    floorProps: [['plant', 0.06, 0.64], ['plant', 0.94, 0.64]] },
 
   { id: 'writeup', label: 'WRITE-UP DESK', x: 792, y: 352, w: 340, h: 148,
-    tile: 'floor_wood', doorSide: 'bottom', doorX: 962, roles: ['scribe'],
-    wall: ['desk_pc', 'whiteboard', 'filing_cabinet', 'clock', 'printer'],
-    floorProps: [['sofa', 0.24, 0.88], ['table', 0.56, 0.86], ['plant', 0.88, 0.86]] },
+    tile: 'floor_wood', counter: true, doorSide: 'bottom', doorX: 962,
+    roles: ['scribe'], accent: '#d9926f',
+    wall: ['desk_pc', 'whiteboard', 'shelving', 'printer', 'clock'],
+    floorProps: [['filing_cabinet', 0.07, 0.64], ['plant', 0.94, 0.64]] },
 
   // The lobby is a proper enclosed room too; its single door is in the top
-  // wall, opening onto the same lower corridor the labs open onto.
+  // wall, opening onto the same lower corridor the labs open onto. It reads as
+  // reception: a waiting side, the coin-eating coffee machine, and greenery.
   { id: 'lobby', label: 'WAITING LOBBY', x: 16, y: 568, w: 1116, h: 80,
     tile: 'floor_wood', backWall: false, doorSide: 'top', doorX: 574,
-    roles: ['operator'], wall: [],
-    floorProps: [['water_cooler', 0.06, 0.95], ['sofa', 0.18, 0.95],
-                 ['table', 0.29, 0.95], ['plant', 0.40, 0.95],
-                 ['sofa', 0.70, 0.95], ['table', 0.80, 0.95],
-                 ['plant', 0.94, 0.95]] },
+    roles: ['operator'], accent: '#9a968e', wall: [],
+    floorProps: [['water_cooler', 0.04, 0.95], ['sofa', 0.13, 0.95],
+                 ['table', 0.22, 0.95], ['sofa', 0.31, 0.95],
+                 ['plant', 0.40, 0.95], ['plant', 0.61, 0.95],
+                 ['sofa', 0.70, 0.95], ['table', 0.79, 0.95],
+                 ['sofa', 0.88, 0.95], ['plant', 0.96, 0.95]] },
 ];
 
 const TOP_ROOMS = ['planning', 'seq', 'qc'];
@@ -139,20 +167,20 @@ function roomAt(x, y) {
   return ROOMS.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
 }
 
-function slots(room) {
-  const n = room.id === 'lobby' ? 6 : 3;
+function slots(room, count = 0) {
+  const n = Math.max(count, room.id === 'lobby' ? 6 : 3);
   const step = room.w / n;
   const y = room.y + room.h - (room.id === 'lobby' ? 12 : 24);
   return Array.from({ length: n }, (_, i) => ({ x: room.x + step * (i + 0.5), y }));
 }
 
 function seat(agents) {
-  const taken = {}, placed = {};
+  const taken = Object.create(null), placed = Object.create(null);
   ROOMS.forEach(r => (taken[r.id] = 0));
   const roomFor = role => ROOMS.find(r => r.roles.includes(role)) || roomById('lobby');
   agents.forEach(a => {
     const r = roomFor(a.role);
-    const free = slots(r);
+    const free = slots(r, agents.filter(other => roomFor(other.role).id === r.id).length);
     placed[a.name] = { ...free[Math.min(taken[r.id]++, free.length - 1)],
                        room: r.id, agent: a };
   });
@@ -187,7 +215,7 @@ function sanitizeTarget(x, y) {
  */
 function buildRoute(fx, fy, tx, ty) {
   const A = roomAt(fx, fy), B = roomAt(tx, ty);
-  if (A === B) return [{ x: tx, y: ty }];
+  if (A && A === B) return [{ x: tx, y: ty }];
 
   const pts = [];
   let lane;
@@ -248,7 +276,7 @@ function wrapLines(text, cols = BUBBLE_COLS, max = BUBBLE_LINES) {
 }
 
 // -- the world -------------------------------------------------------------
-const WORLD = { actors: {}, seen: new Set(), raf: 0, last: 0, hover: null };
+const WORLD = { actors: Object.create(null), seen: new Set(), raf: 0, last: 0, hover: null };
 
 function syncWorld() {
   const agents = state.floor?.agents || [];
@@ -267,6 +295,8 @@ function syncWorld() {
   for (const name of Object.keys(WORLD.actors)) {
     if (!pos[name]) delete WORLD.actors[name];
   }
+  if (state.agent && !pos[state.agent]) state.agent = null;
+  if (WORLD.seen.size > 2000) WORLD.seen = new Set([...WORLD.seen].slice(-1000));
 
   // A routed message becomes an errand: the sender walks over to the person,
   // pauses with them, then heads back. Walking to the recipient's *desk* had
@@ -319,7 +349,8 @@ function stepWorld(dt) {
       const t = act.path[0];
       const dx = t.x - act.x, dy = t.y - act.y;
       const d = Math.hypot(dx, dy);
-      if (d < 2.5) {
+      if (d <= Math.max(2.5, WALK_SPEED * dt)) {
+        act.x = t.x; act.y = t.y;
         act.path.shift();
         if (!act.path.length) act.arrived = performance.now();
       } else {
@@ -327,7 +358,7 @@ function stepWorld(dt) {
         act.y += (dy / d) * WALK_SPEED * dt;
         if (Math.abs(dx) > 0.7) act.facing = dx < 0 ? -1 : 1;
       }
-      act.moving = true;
+      act.moving = act.path.length > 0;
     } else if (act.wait > 0) {
       act.wait -= dt;
       act.moving = false;
@@ -463,7 +494,112 @@ function drawCounter(ctx, room) {
   ctx.restore();
 }
 
+/** The circulation space: two horizontal lanes joined by two vertical ones.
+ *  Painting it lighter than the surrounding slab is what makes the building
+ *  read as rooms-and-corridors rather than boxes on a dark field. */
+function drawCorridors(ctx) {
+  const LANE_W = 46;
+  const lanes = [
+    [0, LANE_TOP - LANE_W / 2, FW, LANE_W],
+    [0, LANE_BOTTOM - LANE_W / 2, FW, LANE_W],
+    ...CONNECTORS.map(x => [x - LANE_W / 2, LANE_TOP, LANE_W, LANE_BOTTOM - LANE_TOP]),
+  ];
+  ctx.save();
+  // A different surface from the rooms and from the slab around them: tiled,
+  // lighter, and edged. A corridor you cannot see is just a gap between boxes.
+  for (const [x, y, w, h] of lanes) {
+    tileRect(ctx, 'floor_tile', x, y, w, h);
+    ctx.fillStyle = 'rgba(20,26,30,0.34)';
+    ctx.fillRect(x, y, w, h);
+  }
+  // A worn centre line down each lane, the way a much-walked floor goes.
+  ctx.strokeStyle = 'rgba(255,252,240,0.06)';
+  ctx.lineWidth = 12;
+  ctx.beginPath();
+  ctx.moveTo(0, LANE_TOP); ctx.lineTo(FW, LANE_TOP);
+  ctx.moveTo(0, LANE_BOTTOM); ctx.lineTo(FW, LANE_BOTTOM);
+  for (const x of CONNECTORS) { ctx.moveTo(x, LANE_TOP); ctx.lineTo(x, LANE_BOTTOM); }
+  ctx.stroke();
+  // Edge lines, drawn only where a lane meets open slab rather than a wall.
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (const [x, y, w, h] of lanes) {
+    ctx.moveTo(x, y + 0.5); ctx.lineTo(x + w, y + 0.5);
+    ctx.moveTo(x, y + h - 0.5); ctx.lineTo(x + w, y + h - 0.5);
+  }
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Skirting board along the foot of the back wall, and the soft shadow the
+ *  wall casts into the room. Cheap, and it stops rooms reading as flat. */
+function drawWallFoot(ctx, room) {
+  if (room.backWall === false) return;
+  const f = frame('wall_skirting');
+  if (f) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(room.x, room.y, room.w, 14);
+    ctx.clip();
+    for (let x = room.x; x < room.x + room.w; x += 64) {
+      ctx.drawImage(ATLAS.img, f.x, f.y, f.w, f.h, x, room.y, 64, 14);
+    }
+    ctx.restore();
+  }
+  const g = ctx.createLinearGradient(0, room.y, 0, room.y + 34);
+  g.addColorStop(0, 'rgba(0,0,0,0.28)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(room.x, room.y, room.w, 34);
+}
+
+/** A pool of light from the room's own strip lights, plus a doormat in the
+ *  doorway so the threshold reads as a way through. */
+function drawRoomLight(ctx, room) {
+  const cx = room.x + room.w / 2, cy = room.y + room.h * 0.45;
+  const g = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(room.w, room.h) * 0.62);
+  g.addColorStop(0, 'rgba(255,246,214,0.16)');
+  g.addColorStop(1, 'rgba(255,246,214,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(room.x, room.y, room.w, room.h);
+}
+
+function drawThreshold(ctx, room) {
+  const y = room.doorSide === 'top' ? room.y - WT - 15 : room.y + room.h + WT + 2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.fillRect(room.doorX - DOOR_W / 2 + 4, y, DOOR_W - 8, 13);
+  ctx.fillStyle = room.accent ? `${room.accent}55` : 'rgba(255,255,255,0.12)';
+  ctx.fillRect(room.doorX - DOOR_W / 2 + 6, y + 2, DOOR_W - 12, 9);
+  ctx.restore();
+}
+
+/** The plate behind a room's name on the wall band, in the room's own colour.
+ *  The text itself stays in the SVG layer, where it renders crisply. */
+function drawSign(ctx, room) {
+  const w = room.label.length * 6.6 + 26, h = 20;
+  // A room with no wall band wears its sign inside, on the right: the left of
+  // the lobby is where whoever is waiting stands, and the two collided.
+  const inside = room.backWall === false;
+  const x = inside ? room.x + room.w - w - 6 : room.x + 4;
+  const y = inside ? room.y + 2 : room.y - WALL_H + 2;
+  ctx.save();
+  ctx.fillStyle = 'rgba(24,28,31,0.88)';
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = room.accent || '#8a867e';
+  ctx.fillRect(x, y, 4, h);
+  ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  ctx.restore();
+}
+
 function paintCanvas() {
+  if (state.scene3d) {
+    window.Lab3D?.update(Object.values(WORLD.actors), state, performance.now());
+    return;
+  }
   const cv = $('#floorcanvas');
   if (!cv || !ATLAS.ready) return;
   const ctx = cv.getContext('2d');
@@ -471,17 +607,25 @@ function paintCanvas() {
   ctx.clearRect(0, 0, FW, FH);
 
   tileRect(ctx, 'floor_lino', 0, 0, FW, FH);
-  ctx.fillStyle = 'rgba(0,0,0,0.20)';
+  ctx.fillStyle = 'rgba(0,0,0,0.34)';
   ctx.fillRect(0, 0, FW, FH);
+  drawCorridors(ctx);
 
   const actors = Object.values(WORLD.actors);
   const staffed = new Set(actors.map(a => a.home?.room));
 
   for (const room of ROOMS) {
-    ctx.globalAlpha = staffed.has(room.id) ? 1 : 0.62;
+    // An unstaffed room is not just dimmer, it is colder: the lights are off in
+    // there, which reads at a glance across six rooms.
+    const lit = staffed.has(room.id);
+    ctx.globalAlpha = lit ? 1 : 0.66;
     if (room.tile) {
       tileRect(ctx, room.tile, room.x, room.y, room.w, room.h);
+      if (lit) drawRoomLight(ctx, room);
       drawShell(ctx, room);
+      drawWallFoot(ctx, room);
+      drawSign(ctx, room);
+      drawThreshold(ctx, room);
     }
     if (room.counter) drawCounter(ctx, room);
 
@@ -491,9 +635,16 @@ function paintCanvas() {
       drawSprite(ctx, prop, room.x + step * (i + 1),
                  room.y + (room.counter ? 52 : 54), { shadow: !room.counter });
     });
+    (room.mid || []).forEach(([prop, fx, fy]) => {
+      drawSprite(ctx, prop, room.x + room.w * fx, room.y + room.h * fy);
+    });
     (room.floorProps || []).forEach(([prop, fx, fy]) => {
       drawSprite(ctx, prop, room.x + room.w * fx, room.y + room.h * fy);
     });
+    if (!lit) {
+      ctx.fillStyle = 'rgba(26,40,54,0.30)';
+      ctx.fillRect(room.x, room.y, room.w, room.h);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -510,13 +661,28 @@ function paintCanvas() {
   }
 
   actors.sort((a, b) => a.y - b.y).forEach(act => {
-    const seated = atHome(act) && SIT_SPRITE[act.agent.role];
-    const name = seated || spriteFor(act.agent);
-    // A walking figure bobs; a seated one does not.
-    const bob = act.moving ? Math.round(Math.sin(performance.now() / 90) * 1.2) : 0;
-    drawSprite(ctx, name, act.x, act.y + bob,
-               { flip: !seated && act.facing < 0 });
+    if (state.voxel) {
+      shadow(ctx, act.x, act.y, 27);
+      VoxelCharacter.draw(ctx, { ...act.agent, x: act.x, y: act.y, scale: 1.65,
+        angle: act.facing < 0 ? -.55 : .55,
+        moving: act.moving && !state.paused,
+        working: act.agent.status === 'working' && !state.paused,
+        phase: state.paused ? 0 : performance.now() / 110 });
+    } else {
+      const seated = atHome(act) && SIT_SPRITE[act.agent.role];
+      drawSprite(ctx, seated || spriteFor(act.agent), act.x, act.y,
+        { flip: !seated && act.facing < 0 });
+    }
   });
+
+  // A vignette, last: it sits over everything and pulls the eye to the middle
+  // of the building instead of its corners.
+  const v = ctx.createRadialGradient(FW / 2, FH / 2, FH * 0.34,
+                                     FW / 2, FH / 2, FH * 0.92);
+  v.addColorStop(0, 'rgba(0,0,0,0)');
+  v.addColorStop(1, 'rgba(0,0,0,0.34)');
+  ctx.fillStyle = v;
+  ctx.fillRect(0, 0, FW, FH);
 }
 
 const CHAR_H = 34 * SCALE;
@@ -527,17 +693,18 @@ const CHAR_H = 34 * SCALE;
 // wasteful and would kill the browser's text rendering cache.
 function floorOverlay() {
   const f = state.floor;
-  if (!f || !f.agents.length) return '';
+  if (!f) return '';
 
   // Rooms with a back wall band get their name on the wall; the lobby has no
   // band, so its name goes just inside its own front wall.
   const labels = ROOMS.map(r => (r.backWall === false
-    ? `<text class="room-label" x="${r.x + 10}" y="${r.y + 17}">${esc(r.label)}</text>`
+    ? `<text class="room-label" text-anchor="end" x="${r.x + r.w - 12}"
+             y="${r.y + 17}">${esc(r.label)}</text>`
     : `<text class="room-label" x="${r.x + 8}" y="${r.y - WALL_H + 15}"
              >${esc(r.label)}</text>`)).join('');
 
   const people = f.agents.map(a => `
-    <g class="station clickable" data-agent="${esc(a.name)}" id="actor-${esc(a.name)}">
+    <g role="button" tabindex="0" aria-label="Select ${esc(a.name)}" class="station clickable" data-agent="${esc(a.name)}" id="actor-${esc(a.name)}">
       <rect class="hit" x="-16" y="${-CHAR_H}" width="32" height="${CHAR_H + 6}"/>
       <rect class="sel" x="-20" y="${-CHAR_H - 4}" width="40" height="${CHAR_H + 10}" rx="5"/>
       <circle class="pip" cx="-20" cy="${-CHAR_H - 8}" r="3.5"/>
@@ -550,6 +717,7 @@ function floorOverlay() {
 }
 
 function paintOverlay() {
+  if (state.scene3d) return;
   const svg = $('.flooroverlay');
   if (!svg) return;
 
@@ -637,13 +805,23 @@ function paintBubbles(svg) {
 function renderFloor() {
   const f = state.floor;
   if (!f) return '<div class="empty">connecting…</div>';
-  if (!f.agents.length) {
-    return `<div class="empty">The floor is empty — no agents enrolled yet.<br><br>
-      <code>bioharness mission "call variants in this sample" --roles pi planner curator</code>
-      </div>`;
-  }
+  if (state.scene3d) return `<div class="lab3d" id="lab3d">
+    <div class="scene-labels" aria-label="Lab rooms and researchers"></div>
+    <div class="scene-loading" role="status">Building your voxel lab…</div>
+    <div class="scene-corner"><span class="scene-live"></span> VOXEL LAB <span>/ LEVEL 01</span></div>
+    <div class="scene-location">Explore your lab</div>
+    <div class="scene-destinations" aria-label="Explore lab rooms"></div>
+    <div class="scene-camera" aria-label="Camera controls">
+      <button data-camera="tour" aria-label="Tour the lab" aria-pressed="false">▶ Tour</button>
+      <button data-camera="in" aria-label="Zoom in">+</button>
+      <button data-camera="out" aria-label="Zoom out">−</button>
+      <button data-camera="reset" aria-label="Reset camera">⌂</button>
+      <button data-camera="full" aria-label="Toggle fullscreen">⛶</button>
+    </div>
+    <div class="scene-instructions">DRAG TO ORBIT · SCROLL TO ZOOM · WASD TO WALK · Q/E TO TURN · F FULLSCREEN</div>
+  </div>`;
   return `<div class="floorstage">
-    <canvas id="floorcanvas" width="${FW}" height="${FH}"></canvas>
+    <canvas id="floorcanvas" aria-label="Live pixel-art research laboratory" width="${FW}" height="${FH}"></canvas>
     <svg class="flooroverlay" viewBox="0 0 ${FW} ${FH}"
          preserveAspectRatio="none">${floorOverlay()}</svg>
   </div>`;
@@ -654,8 +832,10 @@ function tickWorld(ts) {
   WORLD.raf = requestAnimationFrame(tickWorld);
   const dt = Math.min(0.05, (ts - WORLD.last) / 1000 || 0);
   WORLD.last = ts;
-  if (state.tab !== 'floor' || !ATLAS.ready) return;
-  stepWorld(dt);
+  if (document.hidden || state.tab !== 'floor' || (!state.scene3d && !ATLAS.ready)) return;
+  if (ts - (WORLD.lastPaint || 0) < 32) { if (!state.paused) stepWorld(dt); return; }
+  WORLD.lastPaint = ts;
+  if (!state.paused) stepWorld(dt);
   paintCanvas();
   paintOverlay();
 }
@@ -701,13 +881,16 @@ document.addEventListener('mousemove', e => {
 // Command center
 // ==========================================================================
 function ccActivity() {
-  const rows = (state.floor?.activity || []).map(e => `<div>
-      <span class="t">${clock(e.ts)}</span>
-      <span class="e">${esc(e.event)}</span>
-      <span class="p">${esc(JSON.stringify(e.payload || {}).slice(0, 90))}</span>
-    </div>`).join('');
-  return rows ? `<div class="stream">${rows}</div>`
-              : '<div class="empty">No events yet.</div>';
+  const events = (state.floor?.activity || []).slice(0, 50);
+  if (!events.length) return '<div class="empty">Your lab is ready.<br>Activity will appear here as the team works.</div>';
+  return `<div class="activity-list">${events.map(e => {
+    const p = e.payload || {};
+    const title = String(e.event || 'Event').replace(/[._]/g, ' ');
+    const detail = p.from && p.to ? `${p.from} → ${p.to}${p.topic ? ' · ' + p.topic : ''}`
+      : p.workflow || p.agent || p.verdict || p.run_id || '';
+    return `<div class="activity-item"><span class="activity-icon">${e.event?.includes('fail') ? '!' : '·'}</span>
+      <div><strong>${esc(title)}</strong><p>${esc(detail)}</p></div><time>${clock(e.ts)}</time></div>`;
+  }).join('')}</div>`;
 }
 
 const personaBrief = p => !p ? '' :
@@ -716,7 +899,10 @@ const personaBrief = p => !p ? '' :
 function ccWorkers() {
   const agents = state.floor?.agents || [];
   if (!agents.length) return '<div class="empty">No agents enrolled.</div>';
-  return agents.map(a => `<div class="card"><div class="card-body">
+  const visible = state.agent ? agents.filter(a => a.name === state.agent) : agents;
+  return `${state.agent ? '<button class="back-team" data-clear-agent>← All researchers</button>' : ''}` + visible.map(a => `<div class="card researcher-card"><div class="card-body">
+      <div class="portrait-wrap"><canvas class="researcher-portrait" data-name="${esc(a.name)}" width="160" height="160" aria-label="3D portrait of ${esc(a.name)}"></canvas>
+      <span>RESEARCHER / ${esc(a.role).toUpperCase()}</span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <b>${esc(a.name)}</b> ${chip(a.status)}
         <span style="margin-left:auto" class="mono">${esc(a.role)}</span></div>
@@ -749,7 +935,7 @@ function ccStaff() {
   const provOpts = opt.providers.map(p =>
     `<option value="${esc(p.id)}" ${p.available ? '' : 'disabled'} ${sel(p.id, f.provider)}
       >${esc(p.label)}${p.available ? '' : ' — ' + esc(p.reason)}</option>`).join('');
-  const api = opt.providers.find(p => p.id === 'claude-api');
+  const provider = opt.providers.find(p => p.id === f.provider);
 
   return `<div class="card"><h3>Roster</h3>
       ${roster ? `<table><tbody>${roster}</tbody></table>`
@@ -767,7 +953,7 @@ function ccStaff() {
         <select class="pick wide" id="hprov">${provOpts}</select></div>
       <div class="field"><label for="hmodel">model</label>
         <select class="pick wide" id="hmodel">${
-          (api?.models || []).map(m => `<option ${sel(m, f.model)}>${esc(m)}</option>`).join('')
+          (provider?.models || []).map(m => `<option ${sel(m, f.model)}>${esc(m)}</option>`).join('')
           || '<option value="">n/a</option>'}</select></div>
       <div class="field"><label for="hauto">autonomy</label>
         <select class="pick wide" id="hauto">${
@@ -776,14 +962,13 @@ function ccStaff() {
       <button class="send" id="hire" ${state.hiring ? 'disabled' : ''}
         style="margin-top:8px">hire</button>
       ${state.hireMsg ? `<div class="sent">${esc(state.hireMsg)}</div>` : ''}
-      ${api && !api.available ? `<div class="sent" style="color:var(--run)">
-        Claude API: ${esc(api.reason)}</div>` : ''}
+      ${provider && !provider.available ? `<div class="sent" style="color:var(--run)">${esc(provider.reason)}</div>` : ''}
     </div></div>`;
 }
 
 function ccMemory() {
-  return `<input class="search" id="recall" placeholder="Search agent memory…">
-          <div id="recall-out"></div>`;
+  return `<input class="search" id="recall" aria-label="Search memory" value="${esc(state.recallQuery)}" placeholder="Search agent memory…">
+          <div id="recall-out">${state.recallHtml}</div>`;
 }
 
 function ccTasks() {
@@ -809,35 +994,73 @@ function ccHeader() {
   };
 }
 
-function ccBody() {
-  return { activity: ccActivity, workers: ccWorkers, staff: ccStaff,
-           memory: ccMemory, tasks: ccTasks, graph: ccGraph }[state.cc]();
+function ccBriefs() {
+  const rows = state.briefs || [];
+  if (!rows.length) {
+    return `<div class="empty">No orders yet. Send one with the topic
+      <code>directive</code> — every agent answers with a verdict, and the
+      brief is written once the room goes quiet.</div>`;
+  }
+  return rows.map(b => `<div class="card"><div class="card-body">
+      <div class="kv"><span class="k">${clock(b.ts)}</span> → ${esc(b.to)}</div>
+      <div style="margin:4px 0">${esc(b.order.slice(0, 160))}</div>
+      ${b.pdf ? `<a href="/api/brief/${esc(b.thread)}" target="_blank"
+                    rel="noopener">verdict brief (PDF, ${Math.round(b.bytes / 1024)}kB)</a>`
+              : `<a href="/api/brief/${esc(b.thread)}" target="_blank"
+                    rel="noopener">render the brief</a>`}
+    </div></div>`).join('');
 }
 
-const TOPICS = ['goal', 'peer.ask', 'smalltalk', 'greet', 'plan.request',
-                'data.validate', 'qc.check', 'analyze', 'report'];
+function ccBody() {
+  return { activity: ccActivity, briefs: ccBriefs, workers: ccWorkers,
+           staff: ccStaff, memory: ccMemory, tasks: ccTasks,
+           graph: ccGraph }[state.cc]();
+}
+
+// `directive` first: it is what the operator sends most, and the only topic
+// every agent must answer.
+const TOPICS = ['directive', 'goal', 'peer.ask', 'smalltalk', 'greet',
+                'plan.request', 'data.validate', 'qc.check', 'analyze', 'report'];
 
 // Built once per tab switch. Everything that ticks is updated in place below,
 // so the message box is never destroyed under the user's cursor.
 function floorScaffold() {
   return `<div class="floorwrap">
-    <div class="stage"><div class="stage-inner" id="stage"></div></div>
+    <div class="stage">
+      <div class="stage-heading"><div><div class="eyebrow">WORKSPACE / LIVE LAB</div>
+        <h1>Your research, in motion.</h1><p>A shared space for your team and experiments.</p></div>
+        <button class="manage-team" data-cc="staff">＋ Manage team</button></div>
+      <div class="lab-stats" id="lab-stats"></div>
+      <div class="floor-toolbar"><span class="floor-title"><span class="live-indicator"></span> Lab overview</span>
+        <div><button data-view="scene3d" aria-pressed="true">3D Lab</button>
+        <button data-camera="reset">Overview</button>
+        <button data-camera="top">Top view</button>
+        <button data-camera="focus" id="focus-researcher">Follow agent</button>
+        <button data-view="cutaway" aria-pressed="false">Hide walls</button>
+        <button data-view="labels" aria-pressed="true">Labels</button>
+        <button data-view="paused" aria-pressed="false">Pause motion</button></div></div>
+      <div class="stage-inner" id="stage"></div>
+      <div class="floor-guide"><span><i></i> <span id="floor-hint">Select a researcher, then click the floor to move.</span></span>
+        <button data-cc="staff">+ Manage team</button></div>
+    </div>
     <div class="cc">
       <div class="cc-head">
-        <div class="cc-title">COMMAND CENTER <span id="cc-status"></span></div>
+        <div class="cc-title"><span>Lab notebook</span><span class="panel-live">LIVE</span></div>
+        <div class="run-context">Latest run <span id="cc-status"></span></div>
         <div class="cc-sub" id="cc-sub"></div>
       </div>
       <div class="cc-tabs" id="cc-tabs"></div>
       <div class="cc-body" id="cc-body"></div>
       <div class="cc-foot">
-        <textarea class="queue" id="qmsg" placeholder="Message an agent…"></textarea>
+        <label class="composer-title" for="qmsg">Send an instruction</label>
+        <textarea class="queue" id="qmsg" aria-label="Message text" placeholder="What should the team work on?">${esc(state.draft)}</textarea>
         <div class="queue-row">
-          <select class="pick" id="qto"></select>
-          <select class="pick" id="qtopic">${
-            TOPICS.map(t => `<option>${t}</option>`).join('')}</select>
+          <select class="pick" id="qto" aria-label="Recipient"></select>
+          <select class="pick" id="qtopic" aria-label="Message topic">${
+            TOPICS.map(t => `<option ${state.topic === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
           <button class="send" id="qsend">send</button>
         </div>
-        <div class="sent" id="qsent"></div>
+        <div class="sent" role="status" id="qsent"></div>
       </div>
     </div>
     <div class="strip" id="strip"></div>
@@ -845,55 +1068,91 @@ function floorScaffold() {
 }
 
 function paintFloor() {
+  syncWorld();
+  const agents = state.floor?.agents || [];
+  $('#lab-stats').innerHTML = [
+    ['Researchers', agents.length, 'Across seven dedicated spaces'],
+    ['Working now', agents.filter(a => a.status === 'working').length, 'Live agent activity'],
+    ['Need attention', agents.filter(a => ['blocked', 'awaiting'].includes(a.status)).length, 'Blocked or awaiting input'],
+    ['Experiments', state.runs.length, 'Recorded workflow runs'],
+  ].map(([label, value, note]) => `<div class="lab-stat" title="${note}"><strong>${value}</strong><span>${label}</span></div>`).join('');
+  for (const key of ['scene3d', 'cutaway', 'labels', 'paused']) {
+    const button = $(`[data-view="${key}"]`);
+    button.setAttribute('aria-pressed', String(state[key]));
+  }
+  $('[data-view="paused"]').textContent = state.paused ? 'Resume motion' : 'Pause motion';
+  $('#stage').classList.toggle('hide-labels', !state.labels);
+  $('#stage').classList.toggle('is-3d', state.scene3d);
+  $('#focus-researcher').disabled = !state.scene3d || !state.agent;
+  document.querySelectorAll('[data-camera]').forEach(b => { b.disabled = !state.scene3d || (b.dataset.camera === 'focus' && !state.agent); });
+  $('[data-view="cutaway"]').disabled = !state.scene3d;
+  $('#floor-hint').textContent = !state.connected ? 'Connection lost. Reconnecting automatically…'
+    : state.sceneError ? state.sceneError
+    : !state.scene3d && !ATLAS.ready ? 'Lab artwork could not load. Reload the page to retry.'
+    : !agents.length ? 'Your lab is ready. Add your first researcher with Manage team.'
+    : state.agent ? `${state.agent} selected · Click a room to walk there.`
+    : state.scene3d ? 'Drag to explore · Select a researcher, then click the floor to move.'
+    : 'Select a researcher, then click the floor to move.';
   const head = ccHeader();
   $('#cc-status').innerHTML = head.status;
   $('#cc-sub').innerHTML = head.sub;
-  $('#cc-tabs').innerHTML = CC_TABS.map(t =>
-    `<button data-cc="${t}" class="${state.cc === t ? 'on' : ''}">${t}</button>`).join('');
+  updateHTML($('#cc-tabs'), CC_TABS.map(t =>
+    `<button data-cc="${t}" aria-pressed="${state.cc === t}" class="${state.cc === t ? 'on' : ''}">${PANEL_NAMES[t]}</button>`).join(''));
   // Build the stage once; after that only the pixels and the overlay change.
   // Recreating the canvas every tick threw away the drawing and flickered.
-  syncWorld();
   // Rebuild the overlay only when the roster changes; the animation loop moves
   // the existing groups every frame.
   const overlay = $('.flooroverlay');
   const roster = (state.floor?.agents || []).map(a => a.name).join(',');
-  if (!overlay || $('#stage').dataset.roster !== roster) {
-    $('#stage').innerHTML = renderFloor();
-    $('#stage').dataset.roster = roster;
+  const stage = $('#stage');
+  const mode = state.scene3d ? '3d' : '2d';
+  const rebuild = stage.dataset.mode !== mode || (!state.scene3d && (!overlay || stage.dataset.roster !== roster))
+    || (state.scene3d && !$('#lab3d') && state.floor);
+  if (rebuild) {
+    window.Lab3D?.dispose();
+    stage.innerHTML = renderFloor();
+    stage.dataset.roster = roster; stage.dataset.mode = mode;
   }
+  if (state.scene3d && $('#lab3d') && window.Lab3D) window.Lab3D.mount($('#lab3d'), window.labBridge);
   paintCanvas();
   paintOverlay();
-  $('#strip').innerHTML = workerStripInner();
+  updateHTML($('#strip'), workerStripInner());
 
   // Only repaint the body when nothing inside it is being typed into.
   const body = $('#cc-body');
-  if (!body.contains(document.activeElement)) body.innerHTML = ccBody();
+  if (!(body.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'))) updateHTML(body, ccBody());
 
   // Rebuild the recipient list only when the roster actually changes, so the
   // dropdown does not reset while it is open.
   const names = (state.floor?.agents || []).map(a => a.name);
   const sel = $('#qto');
   if (sel && sel.dataset.names !== names.join(',')) {
-    const keep = sel.value;
-    const preferred = state.agent || keep ||
+    const keep = state.recipient || sel.value;
+    const preferred = (keep === '*' || names.includes(keep) ? keep : '') || state.agent ||
       (state.floor?.agents.find(a => a.role === 'pi') || {}).name || names[0];
-    sel.innerHTML = names.map(n =>
+    sel.innerHTML = `<option value="*" ${preferred === '*' ? 'selected' : ''}>Everyone</option>` + names.map(n =>
       `<option value="${esc(n)}" ${n === preferred ? 'selected' : ''}>${esc(n)}</option>`).join('');
-    sel.dataset.names = names.join(',');
+    sel.dataset.names = names.join(','); state.recipient = sel.value;
   }
-  $('#qsend').disabled = state.sending;
+  document.querySelectorAll('.researcher-portrait').forEach(canvas => {
+    const agent = agents.find(a => a.name === canvas.dataset.name);
+    const ctx = canvas.getContext('2d'); ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (agent) VoxelCharacter.draw(ctx, { ...agent, x: 80, y: 146, scale: 4.2, angle: -.5 });
+  });
+  $('#qsend').disabled = state.sending || !state.connected;
+  $('#qsend').textContent = state.sending ? 'Sending…' : 'Send message';
   $('#qsent').textContent = state.sent;
 }
 
 function workerStripInner() {
   const agents = state.floor?.agents || [];
   return agents.map(a => `
-    <div class="wcard ${state.agent === a.name ? 'on' : ''}" data-agent="${esc(a.name)}"
+    <button type="button" class="wcard ${state.agent === a.name ? 'on' : ''}" data-agent="${esc(a.name)}"
          title="${esc(personaBrief(a.persona))}">
       <div class="av" style="background:${avatarFill(a.name)}">${esc(initials(a.name))}</div>
       <div><div class="nm">${esc(a.name)}</div><div class="rl">${esc(a.role)}</div></div>
       <div style="margin-left:auto">${chip(a.status)}</div>
-    </div>`).join('') || '<div class="empty">no agents</div>';
+    </button>`).join('') || '<div class="empty">Your team will appear here. Use Manage team to get started.</div>';
 }
 
 // ==========================================================================
@@ -973,6 +1232,7 @@ const TOPIC_LABEL = {
   'qc.check': 'qc gate', 'analyze': 'interpret', 'report': 'write up',
   'greet': 'says hi', 'greet.reply': 'hi back', 'smalltalk': 'chat',
   'run.request': 'run it', 'run.request.result': 'ran it',
+  'directive': 'ORDER', 'verdict': 'verdict', 'brief': 'brief',
 };
 // Talk that is not about the work reads differently from a work order.
 const SOCIAL_TOPICS = ['greet', 'greet.reply', 'smalltalk'];
@@ -985,20 +1245,34 @@ function richSay(text) {
     .replace(/`([^`\n]+)`/g, '<code>$1</code>');
 }
 
+const VERDICT_CLASS = {
+  'will do': 'v-yes', 'will do with caveats': 'v-maybe', 'cannot do': 'v-no',
+};
+
 function chatTurn(c) {
   const human = c.sender === 'human';
   const label = TOPIC_LABEL[c.topic] || c.topic;
   const social = SOCIAL_TOPICS.includes(c.topic) ? ' social' : '';
-  return `<div class="turn ${human ? 'me' : ''}${social}">
+  const order = c.topic === 'directive' ? ' order' : '';
+  const verdict = c.topic === 'verdict' ? (c.body?.verdict || '') : '';
+  const extra = verdict
+    ? `<span class="vpill ${VERDICT_CLASS[verdict] || ''}">${esc(verdict)}</span>`
+    : '';
+  const brief = c.topic === 'brief' && c.body?.thread
+    ? `<div class="briefline"><a href="/api/brief/${esc(c.body.thread)}"
+         target="_blank" rel="noopener">Open the verdict brief (PDF)</a>
+         <span class="mono">${esc(String(c.body.verdicts || 0))} verdict(s)</span></div>`
+    : '';
+  return `<div class="turn ${human ? 'me' : ''}${social}${order}">
     <div class="av" style="background:${avatarFill(c.sender)}"
          title="${esc(c.sender_role || '')}">${esc(initials(c.sender))}</div>
     <div class="bub">
       <div class="who"><b>${esc(c.sender)}</b>
         ${c.sender_role ? `<span class="role">${esc(c.sender_role)}</span>` : ''}
         <span class="to">→ ${esc(c.recipient)}</span>
-        <span class="tp">${esc(label)}</span>
+        <span class="tp">${esc(label)}</span>${extra}
         <span class="ts">${clock(c.ts)}</span></div>
-      <div class="say">${richSay(c.say)}</div>
+      <div class="say">${richSay(c.say)}</div>${brief}
       ${c.delivered ? '' : '<div class="pending">undelivered — still in the outbox</div>'}
     </div></div>`;
 }
@@ -1071,8 +1345,8 @@ function viewHive() {
     `${clock(e.ts)}  ${e.event}  ${JSON.stringify(e.payload).slice(0, 150)}`).join('\n');
   return `<h2>Hive</h2><div class="sub mono">${esc(h.root)}</div>
     <div class="card"><h3>Memory palace</h3><div class="card-body">
-      <input class="search" id="recall" placeholder="Search agent memory…">
-      <div id="recall-out"></div></div></div>
+      <input class="search" id="recall" aria-label="Search memory" value="${esc(state.recallQuery)}" placeholder="Search agent memory…">
+      <div id="recall-out">${state.recallHtml}</div></div></div>
     ${agents || '<div class="empty">No agents enrolled.</div>'}
     <div class="card"><h3>Blackboard</h3>${bb ? `<div class="scroll"><table>
       <thead><tr><th>Key</th><th>Agent</th><th>Value</th></tr></thead>
@@ -1100,7 +1374,7 @@ function viewCaps() {
 }
 
 function viewCost() {
-  const o = state.overview || {}, c = state.hive?.cost || o.cost || {};
+  const o = state.overview || {}, c = o.cost || state.hive?.cost || {};
   const rows = Object.entries(c.by_agent || {}).map(([a, v]) => `<tr>
       <td class="mono">${esc(a)}</td><td class="mono">${v.calls}</td>
       <td class="mono">${v.tokens_in.toLocaleString()}</td>
@@ -1156,8 +1430,8 @@ function sidebar() {
 }
 
 function render() {
-  $('#nav').innerHTML = TABS.map(t =>
-    `<button data-tab="${t}" class="${state.tab === t ? 'on' : ''}">${t}</button>`).join('');
+  updateHTML($('#nav'), `<div class="nav-monogram" aria-hidden="true">b<span>.</span></div>` + TABS.map(t =>
+    `<button data-tab="${t}" title="${NAV[t][1]}" aria-label="${NAV[t][1]}" aria-current="${state.tab === t ? 'page' : 'false'}" class="${state.tab === t ? 'on' : ''}"><span aria-hidden="true">${NAV[t][0]}</span><small>${t === 'chat' ? 'Chat' : NAV[t][1]}</small></button>`).join('') + '<div class="nav-footer" title="Local workspace">LOCAL</div>');
 
   if (state.tab === 'floor') {
     if (!$('.floorwrap')) $('#shell').innerHTML = floorScaffold();
@@ -1184,37 +1458,52 @@ function render() {
 }
 
 async function refresh(full = false) {
+  if (state.refreshing) { state.refreshQueued = true; return; }
+  state.refreshing = true;
   try {
     const [runs, overview, floor] = await Promise.all(
       [api('/api/runs'), api('/api/overview'), api('/api/floor')]);
     state.runs = runs; state.overview = overview; state.floor = floor;
-    if (!state.runId && runs.length) state.runId = runs[0].run_id;
-    if (state.runId) state.detail = await api(`/api/runs/${state.runId}`).catch(() => null);
+    state.connected = true; render();
+    if (!runs.some(r => r.run_id === state.runId)) state.runId = runs[0]?.run_id || null;
+    const runId = state.runId;
+    const detail = runId ? await api(`/api/runs/${encodeURIComponent(runId)}`).catch(() => null) : null;
+    if (state.runId === runId) state.detail = detail;
     if (state.tab === 'chat') {
       state.chat = await api('/api/conversation?limit=200').catch(() => state.chat);
     }
-    if (state.tab === 'hive' || full || !state.hive) state.hive = await api('/api/hive');
-    if ((state.tab === 'caps' && !state.caps) || full) state.caps = await api('/api/caps');
-    if (!state.staffOptions) {
-      state.staffOptions = await api('/api/staff/options');
-      state.hireForm.role ||= state.staffOptions.roles[0];
-      state.hireForm.model ||= (state.staffOptions.providers
-        .find(p => p.id === 'claude-api')?.models || [])[0] || '';
+    if (state.tab === 'chat' || state.cc === 'briefs' || full) {
+      state.briefs = await api('/api/briefs').catch(() => state.briefs);
     }
+    if (state.tab === 'hive' || full || !state.hive) state.hive = await api('/api/hive').catch(() => state.hive);
+    if ((state.tab === 'caps' && !state.caps) || full) state.caps = await api('/api/caps').catch(() => state.caps);
+    if (!state.staffOptions || full || (state.cc === 'staff' && Date.now() - (state.staffOptionsAt || 0) > 30000)) {
+      state.staffOptions = await api('/api/staff/options').catch(() => null);
+      if (state.staffOptions) state.staffOptionsAt = Date.now();
+      state.hireForm.role ||= state.staffOptions?.roles[0] || '';
+      state.hireForm.model ||= state.staffOptions?.providers.find(p => p.id === state.hireForm.provider)?.models[0] || '';
+    }
+    state.connected = true;
     $('#pulse').className = 'dot';
     $('#tick').textContent = new Date().toLocaleTimeString();
   } catch {
+    state.connected = false;
     $('#pulse').className = 'dot stale';
     $('#tick').textContent = 'disconnected';
   }
+  state.refreshing = false;
   render();
+  if (state.refreshQueued) { state.refreshQueued = false; return refresh(); }
 }
 
 async function loadLog(step) {
-  state.log = { step, text: 'loading…' };
+  const runId = state.runId, stream = state.logTab;
+  const pending = { step, text: 'Loading log…' };
+  state.log = pending;
   render();
-  const r = await api(`/api/runs/${state.runId}/log?step=${
-    encodeURIComponent(step)}&stream=${state.logTab}`);
+  const r = await api(`/api/runs/${encodeURIComponent(runId)}/log?step=${
+    encodeURIComponent(step)}&stream=${stream}`).catch(error => ({ exists: true, text: error.message }));
+  if (state.log !== pending || state.runId !== runId || state.logTab !== stream) return;
   state.log = { step, text: r.exists ? r.text : `(no ${state.logTab}.log for ${step})` };
   render();
 }
@@ -1231,6 +1520,7 @@ function syncHireForm() {
 }
 
 async function hireAgent() {
+  if (state.hiring) return;
   syncHireForm();
   const body = { ...state.hireForm, name: state.hireForm.name.trim() };
   if (!body.name) { state.hireMsg = 'give them a name first'; return render(); }
@@ -1238,62 +1528,79 @@ async function hireAgent() {
   const r = await api('/api/staff/hire', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
-  });
+  }).catch(error => ({ ok: false, error: error.message }));
   state.hiring = false;
   state.hireMsg = r.ok ? `hired ${r.agent.name} as ${r.agent.role}` : `refused: ${r.error}`;
   if (r.ok) state.hireForm.name = '';
   await refresh();
   // The roster changed, so the cc body is stale even though it holds focus.
-  const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
+  const b = $('#cc-body'); if (b) { b.dataset.rendered = ''; b.innerHTML = ccBody(); }
 }
 
 async function fireAgent(name) {
   const r = await api('/api/staff/fire', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
-  });
+  }).catch(error => ({ ok: false, error: error.message }));
   state.hireMsg = r.ok ? `dismissed ${name}` : `refused: ${r.error}`;
-  if (state.agent === name) state.agent = null;
-  delete WORLD.actors[name];
+  if (r.ok) {
+    if (state.agent === name) state.agent = null;
+    delete WORLD.actors[name];
+  }
   await refresh();
-  const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
+  const b = $('#cc-body'); if (b) { b.dataset.rendered = ''; b.innerHTML = ccBody(); }
 }
 
 async function sendMessage() {
-  const text = $('#qmsg')?.value.trim();
+  const originalDraft = $('#qmsg')?.value || state.draft;
+  const text = originalDraft.trim();
   if (!text) return;
-  state.sending = true; render();
+  if (state.sending) return;
   const to = $('#qto')?.value, topic = $('#qtopic')?.value || 'goal';
+  state.draft = originalDraft; state.recipient = to; state.topic = topic;
+  state.sending = true; render();
   // Each topic wants its own field name; `peer.ask` posts a question, and
   // sending one as `note` would reach the agent with nothing to answer.
-  const body = topic === 'goal' ? { goal: text }
+  const body = topic === 'directive' ? { order: text }
+    : topic === 'goal' ? { goal: text }
     : topic === 'peer.ask' ? { question: text, hops: 0 }
     : ['smalltalk', 'greet'].includes(topic) ? { line: text, hops: 0 }
     : { note: text };
   const r = await api('/api/message', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ to, topic, body }),
-  });
+  }).catch(error => ({ ok: false, error: error.message }));
   state.sending = false;
   state.sent = r.ok ? `queued ${r.topic} → ${r.to} (${r.id})` : `refused: ${r.error}`;
   const box = $('#qmsg');
-  if (r.ok && box) box.value = '';
+  if (r.ok && state.draft === originalDraft && (!box || box.value === originalDraft)) {
+    state.draft = ''; if (box) box.value = '';
+  }
   await refresh();
 }
 
 document.addEventListener('click', e => {
+  if (e.target.closest('[data-clear-agent]')) { state.agent = null; return render(); }
+  const camera = e.target.closest('[data-camera]');
+  if (camera) return window.Lab3D?.action(camera.dataset.camera, state.agent);
+  const view = e.target.closest('[data-view]');
+  if (view) {
+    state[view.dataset.view] = !state[view.dataset.view];
+    if (view.dataset.view === 'scene3d') state.sceneError = '';
+    return paintFloor();
+  }
   const t = e.target.closest('[data-tab]');
-  if (t) { state.tab = t.dataset.tab; state.log = null;
-           $('#shell').innerHTML = ''; return refresh(); }
+  if (t) { window.Lab3D?.dispose(); state.tab = t.dataset.tab; state.log = null;
+           $('#shell').innerHTML = ''; render(); return refresh(); }
   const cc = e.target.closest('[data-cc]');
   if (cc) { state.cc = cc.dataset.cc;
-            const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
+            const b = $('#cc-body'); if (b) { b.dataset.rendered = ''; b.innerHTML = ccBody(); }
             return render(); }
   const ag = e.target.closest('[data-agent]');
   if (ag) {
     state.agent = state.agent === ag.dataset.agent ? null : ag.dataset.agent;
     state.cc = 'workers';
-    const b = $('#cc-body'); if (b) b.innerHTML = ccBody();
+    const b = $('#cc-body'); if (b) { b.dataset.rendered = ''; b.innerHTML = ccBody(); }
     return render();
   }
   if (e.target.classList?.contains('floorhit')) {
@@ -1307,7 +1614,7 @@ document.addEventListener('click', e => {
     return render();
   }
   const run = e.target.closest('[data-run]');
-  if (run) { state.runId = run.dataset.run; state.log = null; return refresh(); }
+  if (run) { state.runId = run.dataset.run; state.detail = null; state.log = null; render(); return refresh(); }
   const step = e.target.closest('[data-step]');
   if (step) return loadLog(step.dataset.step);
   const lt = e.target.closest('[data-logtab]');
@@ -1318,24 +1625,65 @@ document.addEventListener('click', e => {
   if (fire) return fireAgent(fire.dataset.fire);
 });
 
+document.addEventListener('keydown', e => {
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.station[data-agent]')) {
+    e.preventDefault(); e.target.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  }
+});
+
 document.addEventListener('change', e => {
-  if (e.target.closest?.('.cc-foot')) return;
+  if (e.target.id === 'qto') { state.recipient = e.target.value; return; }
+  if (e.target.id === 'qtopic') { state.topic = e.target.value; return; }
+  if (e.target.id === 'hprov') {
+    syncHireForm();
+    state.hireForm.model = state.staffOptions?.providers.find(p => p.id === state.hireForm.provider)?.models[0] || '';
+    const body = $('#cc-body'); if (body) { body.dataset.rendered = ''; body.innerHTML = ccBody(); }
+    return;
+  }
   if (['hname', 'hrole', 'hprov', 'hmodel', 'hauto'].includes(e.target.id)) syncHireForm();
 });
 
 document.addEventListener('input', async e => {
+  if (e.target.id === 'qmsg') { state.draft = e.target.value; return; }
   if (['hname'].includes(e.target.id)) syncHireForm();
   if (e.target.id !== 'recall') return;
   const q = e.target.value.trim();
+  state.recallQuery = e.target.value;
   const out = $('#recall-out');
   if (!out) return;
-  if (!q) { out.innerHTML = ''; return; }
-  const hits = await api('/api/recall?q=' + encodeURIComponent(q));
-  out.innerHTML = hits.length ? hits.map(h => `<div class="msg">
+  if (!q) { state.recallHtml = ''; out.innerHTML = ''; return; }
+  const hits = await api('/api/recall?q=' + encodeURIComponent(q)).catch(() => null);
+  if ($('#recall')?.value.trim() !== q || !out.isConnected) return;
+  if (!hits) { state.recallHtml = 'Could not search memory. Please try again.'; out.textContent = state.recallHtml; return; }
+  state.recallHtml = hits.length ? hits.map(h => `<div class="msg">
       <b>${esc(h.agent)}</b> <span style="color:var(--muted)">[${esc(h.kind)}]</span><br>
       ${esc(h.text.slice(0, 400))}</div>`).join('')
-    : '<div class="empty">nothing remembered about that</div>';
+    : '<div class="empty">No matching memories.</div>';
+  out.innerHTML = state.recallHtml;
 });
 
-loadAtlas().then(() => { refresh(true); startWorld(); });
-setInterval(() => refresh(), 3000);
+state.paused = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+window.labBridge = {
+  rooms: ROOMS,
+  select(name) {
+    state.agent = name && state.agent !== name ? name : null;
+    state.cc = 'workers';
+    const body = $('#cc-body'); if (body) { body.dataset.rendered = ''; body.innerHTML = ccBody(); }
+    render();
+  },
+  walk(x, y) { if (state.agent) walkTo(state.agent, x, y); },
+  notice(message) { state.sceneError = message; },
+  fail(message) {
+    state.sceneError = message; state.scene3d = false;
+    if (state.tab === 'floor') render();
+  },
+};
+window.addEventListener('lab3d-ready', () => { if (state.tab === 'floor') render(); });
+// Failed module loads must leave a usable floor, including browsers without import maps.
+setTimeout(() => {
+  if (!window.Lab3D && state.scene3d) window.labBridge.fail('3D engine could not load. Showing the 2D lab.');
+}, 12000);
+
+loadAtlas();
+render(); refresh(true); startWorld();
+setInterval(() => { if (!state.refreshing) refresh(); }, 3000);

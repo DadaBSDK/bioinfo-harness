@@ -260,3 +260,12 @@ def test_an_agent_is_primed_with_its_own_memory_only(ctx: AgentContext):
     nova.remember("Run r-9 duplication rate was 31 percent")
     assert not any(r["agent"] == "quill" for r in nova.recall("run r-9"))
     assert any(r["agent"] == "quill" for r in nova.recall("run r-9", everyone=True))
+
+
+def test_roster_only_does_not_instantiate_other_agents(ctx):
+    ctx.hive.enroll('selected', 'analyst', provider='builtin')
+    ctx.hive.enroll('pending', 'scribe', provider='builtin')
+    selected = roster_agents(ctx.hive, ctx, only=['selected'])
+    assert [a.name for a in selected] == ['selected']
+    assert not (ctx.workdir / 'pending').exists()
+    assert roster_agents(ctx.hive, ctx, only=[]) == []

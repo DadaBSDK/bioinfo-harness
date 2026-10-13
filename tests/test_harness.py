@@ -464,3 +464,37 @@ def test_shipped_workflows_load_and_reference_real_capabilities(name):
     for step in wf.steps:
         assert step.capability in reg, f"{name}: unknown capability {step.capability}"
     topo_sort(wf)     # must be acyclic and fully connected
+
+
+def test_workflow_runs_in_a_directory_with_spaces_and_quotes(registry, tmp_path):
+    workspace = Workspace(tmp_path / "Lab with spaces and 'quotes'")
+    orchestrator = Orchestrator(registry, workspace, Guardrails())
+    summary = orchestrator.run(workflow_from_dict({'name': 'quoted-path', 'steps': [
+        {'id': 'make', 'capability': 'make_text', 'params': {'message': "hello 'lab' $HOME; literal"}},
+        {'id': 'upper', 'capability': 'upper', 'needs': ['make'],
+         'with': {'text': '{{ steps.make.outputs.text }}'}}]}))
+    assert summary['status'] == 'ok'
+    output = workspace.step_dir('upper') / 'upper.txt'
+    assert output.read_text().strip() == "HELLO 'LAB' $HOME; LITERAL"
+
+
+@pytest.mark.parametrize('script', [
+    'printf %s {{ value }}',
+    'printf %s "{{ value }}"',
+    "printf %s '{{ value }}'",
+])
+def test_shell_substitutions_preserve_literal_special_characters(script):
+    import shlex
+    import subprocess
+    from bioharness.core.template import render_argv
+    value = 'spaces \' " $HOME `echo unwanted` ; $(echo nope) \\ end'
+    argv = render_argv('sh -c ' + shlex.quote(script), {'value': value})
+    result = subprocess.run(argv, capture_output=True, text=True, check=True)
+    assert result.stdout == value
+
+
+def test_direct_commands_expand_lists_without_splitting_paths():
+    from bioharness.core.template import render_argv
+    assert render_argv('tool {{ files }} --out "{{ outdir }}/file.txt"',
+                       {'files': ['one file', 'two files'], 'outdir': 'my lab'}) == [
+                           'tool', 'one file', 'two files', '--out', 'my lab/file.txt']

@@ -16,7 +16,7 @@ from typing import Any
 from .guardrails import GuardrailTripped, Guardrails
 from .registry import Registry
 from .schemas import Capability, Runtime, Status, Task
-from .template import missing_tokens, render, render_value
+from .template import missing_tokens, render_argv, render_value
 from .workspace import Workspace
 
 
@@ -79,8 +79,9 @@ class Executor:
                 f"step {task.step_id!r}: unresolved template values {missing} "
                 f"in capability {cap.id!r}")
 
-        task.rendered = render(cap.command, context, quote=True).strip()
-        task.argv = self._wrap_runtime(cap, task, shlex.split(task.rendered))
+        argv = render_argv(cap.command, context)
+        task.rendered = shlex.join(argv)
+        task.argv = self._wrap_runtime(cap, task, argv)
         return task
 
     def _wrap_runtime(self, cap: Capability, task: Task, argv: list[str]) -> list[str]:

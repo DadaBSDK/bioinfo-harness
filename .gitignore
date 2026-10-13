@@ -7,3 +7,10 @@ dist/
 .bioharness/
 runs/
 .pytest_cache/
+
+# Local credentials and session history
+.env
+.env.*
+!.env.example
+.Rhistory
+.RData

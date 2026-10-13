@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlparse
 
+from .core.brief import gather, line_of, orders, render, SAFE_ID
 from .core.hive import Hive
 from .core.registry import Registry
 from .core.schemas import to_jsonable
@@ -322,25 +323,65 @@ class Dashboard:
     # one the roster actually handles.
     ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
                       "qc.check", "analyze", "report", "peer.ask",
-                      "smalltalk", "greet", "run.request")
+                      "smalltalk", "greet", "run.request", "directive")
 
     def send_message(self, to: str, topic: str, body: dict[str, Any]) -> dict[str, Any]:
         hive = self.hive()
         names = {a["name"] for a in hive.roster()}
-        if to not in names:
+        # "*" is the operator addressing the whole lab; the router fans it out.
+        if to != "*" and to not in names:
             return {"ok": False, "error": f"no agent named {to!r}; enrolled: {sorted(names)}"}
+        if to == "*" and not (names - {"human"}):
+            return {"ok": False, "error": "nobody is hired"}
         if topic not in self.ALLOWED_TOPICS:
             return {"ok": False,
                     "error": f"topic {topic!r} not allowed; use one of {list(self.ALLOWED_TOPICS)}"}
         if "human" not in names:
             hive.enroll("human", "operator")
+        if topic == "directive" and "order" not in body:
+            body = {**body, "order": body.get("line") or body.get("note")
+                    or body.get("goal", "")}
         if topic in ("smalltalk", "greet") and "line" not in body:
             # The composer posts free text; these topics read it as `line`.
             body = {**body, "line": body.get("note") or body.get("goal", ""),
                     "hops": 0}
+        # The operator's message opens a thread of its own, and everything said
+        # in answer stays in it -- that thread is what a brief is built from.
+        # The operator's message opens a thread of its own, and everything said
+        # in answer stays in it -- that thread is what a brief is built from.
         msg = hive.send("human", to, topic, body)
-        hive.event("message.queued_by_human", {"to": to, "topic": topic, "id": msg.id})
-        return {"ok": True, "id": msg.id, "to": to, "topic": topic}
+        hive.event("message.queued_by_human", {"to": to, "topic": topic,
+                                               "id": msg.id, "thread": msg.thread})
+        return {"ok": True, "id": msg.id, "to": to, "topic": topic,
+                "thread": msg.thread}
+
+    # -- briefs ------------------------------------------------------------
+    @property
+    def brief_dir(self) -> Path:
+        return self.runs / "briefs"
+
+    def briefs(self) -> list[dict[str, Any]]:
+        """Orders the operator has given, and the PDF for each if it exists."""
+        hive = self.hive()
+        out = []
+        for order in orders(hive)[::-1]:
+            pdf = self.brief_dir / f"brief-{order['thread']}.pdf"
+            out.append({**order, "pdf": pdf.name if pdf.is_file() else "",
+                        "bytes": pdf.stat().st_size if pdf.is_file() else 0})
+        return out
+
+    def brief_pdf(self, thread: str) -> tuple[bytes, str] | None:
+        if not SAFE_ID.match(thread or ""):
+            return None
+        pdf = self.brief_dir / f"brief-{thread}.pdf"
+        if not pdf.is_file():
+            # Not written yet (or written before this run directory): build it
+            # now rather than showing the operator a dead link.
+            brief = gather(self.hive(), thread)
+            if not brief:
+                return None
+            pdf = render(brief, self.brief_dir)
+        return pdf.read_bytes(), pdf.name
 
     def recall(self, query: str, limit: int = 20) -> list[dict[str, Any]]:
         return self.hive().palace.search(query, limit=limit) if query else []
@@ -449,38 +490,8 @@ class Dashboard:
 
 
 def _say(m: dict[str, Any]) -> str:
-    """One line of plain English for a message, for the conversation view.
-
-    Falls back to compact JSON rather than to an empty bubble: an unrecognised
-    topic should still show what was actually said.
-    """
-    topic = m.get("topic", "")
-    body = m.get("body", {}) or {}
-    # An answer carries the question it answers, so `answer` must be checked
-    # first -- otherwise every reply shows as an echo of what was asked.
-    # `instruction` is what a dispatched agent was actually told to do; without
-    # it a tasking message renders as the whole JSON body of its work item.
-    for key in ("line", "answer", "question", "instruction", "goal", "summary",
-                "reason", "error"):
-        if body.get(key):
-            return str(body[key]).strip()
-    if topic.endswith(".result") or topic in ("data.validate", "qc.check"):
-        bits = []
-        if "verdict" in body:
-            bits.append(str(body["verdict"]))
-        if "ok" in body:
-            bits.append("ok" if body["ok"] else "not ok")
-        for key in ("problems", "failures", "briefed", "candidates"):
-            if body.get(key):
-                bits.append(f"{len(body[key])} {key}")
-        if body.get("workflow"):
-            wf = body["workflow"]
-            steps = wf.get("steps", []) if isinstance(wf, dict) else []
-            bits.append(" → ".join(s.get("capability", "?") for s in steps) or "workflow")
-        if bits:
-            return ", ".join(bits)
-    text = json.dumps(body, default=str)
-    return text if len(text) <= 220 else text[:217] + "…"
+    """One line of plain English for a message, for the conversation view."""
+    return line_of(m)
 
 
 def _msg(m: Any) -> dict[str, Any]:
@@ -525,6 +536,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json(d.floor_state())
         if route == "/api/hive":
             return self._send_json(d.hive_state())
+        if route == "/api/briefs":
+            return self._send_json(d.briefs())
+        if route.startswith("/api/brief/"):
+            got = d.brief_pdf(unquote(route[len("/api/brief/"):]))
+            if got is None:
+                return self._send_json({"error": "no such brief"}, status=404)
+            return self._send_pdf(*got)
         if route == "/api/conversation":
             return self._send_json(d.conversation(
                 int(query.get("limit", ["200"])[0])))
@@ -553,10 +571,33 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_json({"error": "no such endpoint"}, status=404)
         try:
             length = int(self.headers.get("Content-Length", "0"))
+            if length < 0:
+                raise ValueError("Content-Length must be non-negative")
+            if length > 1024 * 1024:
+                return self._send_json({"ok": False, "error": "request is too large"}, status=413)
             payload = json.loads(self.rfile.read(length) or b"{}")
-        except (ValueError, json.JSONDecodeError) as exc:
-            return self._send_json({"ok": False, "error": f"bad JSON: {exc}"}, status=400)
+            if not isinstance(payload, dict):
+                raise ValueError("request must be a JSON object")
+            for key in ("to", "topic", "name", "role", "provider", "model", "autonomy"):
+                if key in payload and not isinstance(payload[key], str):
+                    raise ValueError(f"{key} must be a string")
+            if "body" in payload and not isinstance(payload["body"], dict):
+                raise ValueError("body must be a JSON object")
+            for key in ("scope", "names"):
+                value = payload.get(key)
+                if value is not None and (not isinstance(value, list) or
+                                          not all(isinstance(item, str) for item in value)):
+                    raise ValueError(f"{key} must be an array of strings")
+        except (ValueError, UnicodeDecodeError) as exc:
+            return self._send_json({"ok": False, "error": f"bad request: {exc}"}, status=400)
 
+        try:
+            result = self._dispatch_post(route, payload)
+        except Exception as exc:  # keep a failed write from terminating the handler
+            return self._send_json({"ok": False, "error": str(exc)}, status=500)
+        return self._send_json(result, status=200 if result.get("ok") else 400)
+
+    def _dispatch_post(self, route: str, payload: dict[str, Any]) -> dict[str, Any]:
         if route == "/api/message":
             result = self.dash.send_message(
                 to=str(payload.get("to", "")), topic=str(payload.get("topic", "goal")),
@@ -577,12 +618,12 @@ class Handler(BaseHTTPRequestHandler):
                 scope=payload.get("scope"))
         else:
             result = self.dash.fire(str(payload.get("name", "")))
-        return self._send_json(result, status=200 if result.get("ok") else 400)
+        return result
 
     def _static(self, route: str) -> None:
         rel = "index.html" if route in ("/", "") else route.lstrip("/")
         target = (UI_DIR / rel).resolve()
-        if not str(target).startswith(str(UI_DIR.resolve())) or not target.is_file():
+        if not target.is_relative_to(UI_DIR.resolve()) or not target.is_file():
             self.send_error(404, "not found")
             return
         body = target.read_bytes()
@@ -590,6 +631,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _send_pdf(self, body: bytes, name: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "application/pdf")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Disposition", f'inline; filename="{name}"')
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(body)

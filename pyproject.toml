@@ -23,7 +23,7 @@ bioharness = "bioharness.cli:main"
 include = ["bioharness*"]
 
 [tool.setuptools.package-data]
-bioharness = ["ui/*.html", "ui/*.css", "ui/*.js"]
+bioharness = ["ui/*.html", "ui/*.css", "ui/*.js", "ui/assets/*.png", "ui/assets/*.json", "ui/assets/voxel/*.png", "ui/assets/voxel/*.json", "ui/assets/voxel/*.glb", "ui/assets/voxel/*.md", "ui/vendor/*.js", "ui/vendor/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

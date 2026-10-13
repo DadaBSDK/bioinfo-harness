@@ -102,12 +102,23 @@ The floor is one continuous building. Every room is a sealed enclosure — back
 wall band, both side walls, and a front wall broken by exactly one doorway —
 including the waiting lobby along the bottom. Rooms open onto one of two
 corridor lanes, and the lanes are joined by the vertical gaps between the room
-columns. **The staff are
+columns; the corridors are laid in their own tile, edged and worn down the
+middle, so circulation reads as circulation rather than as a gap between boxes.
+
+What stands in each room is the instrument list from `agents/lab.py`, drawn with
+the nearest sprite the atlas has — the sequencer, thermocycler and -80 in the
+sequencing bay, two rows of racks and the head-node terminal in the cold aisle,
+the microscope and gel dock at the QC bench. Every room carries a nameplate in
+its own accent colour, wears that colour again on its threshold mat, and has a
+work surface its people stand at. A staffed room is lit from its own strip
+lights; an empty one has the lights off and goes cold and blue, which reads at a
+glance across six rooms. **The staff are
 animated and the floor is interactive:**
 
 - agents sit at their stations when idle, and stand up to walk
-- a routed message becomes an errand — the sender walks to the recipient's
-  desk, pauses there, then heads back
+- a routed message becomes an errand — the sender walks to *the recipient*,
+  pauses with them, then heads back. Walking to their desk instead had two
+  agents swap rooms whenever they replied to each other
 - **nobody walks through a wall**: a route slides across to its own room's
   doorway, steps out, follows a corridor and enters the target room by *its*
   doorway. `tests/route_check.mjs` samples every room-to-room route and fails
@@ -185,6 +196,77 @@ bioharness mission "call variants in this WGS sample" --from-type fastq --to-typ
 With no `--roles`, a mission staffs itself from whoever is hired, and each agent
 uses **its own** provider — so an API-backed analyst and a deterministic curator
 work the same mission. `--roles` overrides the roster for one run.
+
+### Orders, and the brief every order produces
+
+The operator is the one voice in this lab that cannot be ignored.
+
+```bash
+bioharness order "take this sample from FASTQ to called variants"
+bioharness order "check the reference genome" --to iris
+bioharness brief latest          # or a thread id
+```
+
+An order goes to the whole roster by default. Three rules make it an order
+rather than a suggestion:
+
+- **It is read first.** An agent sorts the operator's mail to the front of its
+  inbox, so an order never waits behind a conversation about the coffee rota.
+- **It is never dropped.** Peer and social topics already bypassed a role's
+  `subscribes`; so does anything the operator sends. A message to a scribe on a
+  topic no scribe handles used to vanish, which is exactly what "they don't
+  listen" looks like from outside.
+- **Everyone owes it a verdict**: `will do`, `will do with caveats`, or
+  `cannot do`, with what they will do about it, what they need, and the one risk
+  they would flag. The PI answers *and* puts the lab to work; the others answer
+  and get on with their part.
+
+Two things an order still cannot do, because they would make the lab useless to
+the person giving the order: state something as fact that the data does not
+show, and pretend a check passed when it did not. An agent that hits one of
+those answers `cannot do`, names the obstacle, and offers the nearest honest
+thing instead. The autonomy ladder is unchanged as well — an order cannot make a
+`read_only` agent execute.
+
+**An order can carry its own parameters.** Anything written as `key=value` in
+the order text travels with the mission to the step that declared it, so the
+lab's question can be answered with one more order rather than a conversation:
+
+```bash
+bioharness order "fetch the reads and stop there: accession=SRR000001 max_reads=500"
+```
+
+Two capabilities exist to make "fetch the data online" mean something —
+`ena_fetch` (reads from ENA/SRA by run accession) and `ref_fetch` (a reference
+FASTA from a URL). Without them the type graph began at a `fastq` file somebody
+had already downloaded by hand, so an order to fetch and run was unroutable and
+the lab could only discuss it. They are Python capabilities rather than shell
+one-liners: a fetch is where a pipeline meets the outside world, and a dead
+mirror or an unreleased accession deserves a sentence the operator can act on
+rather than `exited 2`.
+
+**Every order becomes a PDF.** Once the room goes quiet, the attendant writes a
+verdict brief: the order verbatim, every agent's verdict in its own words with
+its needs and risks (refusals first), anyone who spoke but never answered, what
+was executed under the order, and what it cost. It lands in `runs/briefs/`, is
+linked in the **chat** tab and listed under **briefs** in the command center, and
+is served at `/api/brief/<thread>`.
+
+```bash
+bioharness attend --brief-after 20    # seconds of quiet before a brief is written
+bioharness attend --no-brief          # do not write them
+```
+
+The whole document is reconstructed from messages on disk, so a brief can be
+rendered again months later from a hive directory alone. It is written by
+`tools/pdf.py` — about two hundred lines of standard library, base-14 fonts, no
+dependency and no headless browser, for the same reason the dashboard needs no
+JS toolchain: a bioinformatics box should not have to install a document stack
+to produce a page of text.
+
+Threading is what makes this possible: a message that answers nothing starts a
+thread of its own, and everything said in reply carries that id. One order,
+twenty-eight messages, one brief.
 
 ### Agents talking to each other
 
@@ -611,3 +693,64 @@ Working core and dashboard. Not yet built: HPC submission (Slurm/SGE executor
 backends) and encrypted cross-machine transport for the mailbox layer.
 
 MIT.
+
+### Pixelated 3D researchers
+
+The lab now uses original articulated block characters rendered from 3D cuboids,
+with per-name colours, lab coats, goggles, and walking poses. No CDN or GPU setup
+is required. Select a researcher on the floor or team strip to inspect their
+larger portrait; click a floor destination to send them walking through the lab.
+Use **3D characters** to switch to the original sprites, **Labels** to simplify
+the view, and **Pause motion** to freeze local movement without pausing agents.
+Reduced-motion preferences start the view paused. The dashboard also adapts to
+narrow screens and keeps failed message drafts available for retry.
+
+Run the frontend regressions with `node --test tests/ui_regression.mjs`, alongside
+`python -m pytest` and `node tests/route_check.mjs` from the project root.
+
+### Full 3D voxel laboratory
+
+The **3D Lab** view now renders the entire seven-room laboratory with actual 3D
+walls, tiled and wooden floors, windows, doors, equipment, furniture, plants,
+lights, shadows, and animated researchers. The existing live roster, agent
+selection, and doorway routing remain connected to the scene.
+
+- Drag to orbit; scroll or pinch to zoom; right-drag or two-finger drag to pan.
+- Use **Overview** and **Top view** for camera presets. **Follow agent** swoops down
+  behind the selected researcher and rides along as they walk.
+- The perspective scene floats in a sky with drifting clouds; rooms have their own
+  light, screens glow, equipment LEDs blink, and dust drifts through the air.
+- **Hide walls** exposes equipment; **Labels** controls room and researcher tags.
+- Select a researcher, then click a floor destination to move them locally.
+- **Pause motion** stops local walking animation without stopping backend agents.
+- Keyboard: focus the scene, then `W` `A` `S` `D` (or arrows) to walk, `Q`/`E` to turn,
+  `F` for fullscreen, `Home` to reset, `+`/`-` to zoom, `Escape` to clear selection.
+- Turn **3D Lab** off for the original 2D floor. Unsupported WebGL browsers fall
+  back automatically. No internet connection or frontend build is needed at runtime.
+
+The generated asset pack is in `bioharness/ui/assets/voxel/`: 22 portable `.glb`
+models, 15 pixel textures, and a model catalog. Rebuild it with
+`python tools/generate_voxel_assets.py`. Three.js is bundled with its MIT license.
+
+### Small local-model lab
+
+For a small local team, install Ollama, start its server, and provision these
+researchers once in a new workspace:
+
+```sh
+ollama pull qwen2.5:3b
+bioharness staff hire local-qwen --role planner --provider ollama --model qwen2.5:3b --autonomy read_only
+bioharness staff hire local-qc --role validator --provider ollama --model qwen2.5:3b --autonomy read_only
+```
+
+Start the dashboard and process only their messages with:
+
+```sh
+python -m bioharness.cli ui --attend --only local-qwen local-qc --no-social --no-brief --no-open --port 8876
+```
+
+`--only` also works with `bioharness attend`. Other agents stay enrolled but
+their pending messages are not processed by this worker. In the lab composer,
+select either local researcher and send a `peer.ask` question or a directive.
+These test researchers have read-only execution authority. Ollama must be running;
+`ollama list` should include `qwen2.5:3b`.

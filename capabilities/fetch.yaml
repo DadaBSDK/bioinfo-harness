@@ -1,0 +1,34 @@
+# Getting data into the building.
+#
+# Without these the type graph starts at `fastq`, which means it starts at a
+# file the operator has already downloaded by hand. An order like "fetch the
+# banana salinity data and run it" was then unroutable, and the lab could only
+# discuss it: seven agents describing what they would do with reads nobody
+# could obtain. A fetch step is what turns that into a pipeline.
+capabilities:
+  - id: ena_fetch
+    domain: ngs
+    version: "1.0"
+    summary: Download sequencing reads from ENA/SRA by run accession
+    runtime: {kind: python, entrypoint: "bioharness.tools.fetch:ena"}
+    command: ""
+    inputs: []
+    outputs:
+      - {name: reads, type: fastq, glob: "*.fastq", multiple: true}
+    params: {accession: "", max_reads: 25000}
+    resources: {cpu: 1, mem_gb: 2, walltime_min: 120}
+    tags: [fetch, reads, ena, sra]
+    citation: "Burgin J, et al. The European Nucleotide Archive in 2022. Nucleic Acids Res. 2023."
+
+  - id: ref_fetch
+    domain: general
+    version: "1.0"
+    summary: Download a reference genome FASTA from a URL
+    runtime: {kind: python, entrypoint: "bioharness.tools.fetch:reference"}
+    command: ""
+    inputs: []
+    outputs:
+      - {name: reference, type: fasta, glob: "*.fa"}
+    params: {url: "", name: "reference"}
+    resources: {cpu: 1, mem_gb: 2, walltime_min: 60}
+    tags: [fetch, reference, genome]

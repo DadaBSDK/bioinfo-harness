@@ -54,6 +54,89 @@ def plan_by_types(registry: Registry, start_type: str, goal_type: str,
     return []
 
 
+def source_for(registry: Registry, data_type: str,
+               domain: str | None = None) -> str | None:
+    """A capability that produces `data_type` out of nothing but parameters.
+
+    `plan_by_types` walks from a type it already has, so a pipeline could only
+    ever start from a file already sitting on disk. A fetch step is what lets an
+    order say "get the data and run it" and mean it.
+    """
+    for cap in registry.all():
+        if any(not port.optional for port in cap.inputs):
+            continue
+        if domain and cap.domain not in (domain, "general"):
+            continue
+        if any(out.type == data_type for out in cap.outputs):
+            return cap.id
+    return None
+
+
+# `accession=SRR000001` inside an order. Quoted values keep their spaces so a
+# URL or a path can be handed over the same way.
+ORDER_PARAM = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(\"[^\"]+\"|'[^']+'|\S+)")
+
+
+def params_in(text: str) -> dict[str, Any]:
+    """Parameters the operator wrote into the order itself.
+
+    The lab asks for an accession and a reference URL; this is what makes the
+    answer usable when it arrives, instead of another round of questions.
+    """
+    out: dict[str, Any] = {}
+    for name, value in ORDER_PARAM.findall(text or ""):
+        out[name] = value.strip("\"'")
+    return out
+
+
+def repair_plan(registry: Registry, wf: dict[str, Any]) -> dict[str, Any]:
+    """Correct the plan mistakes a model reliably makes, against the registry.
+
+    The common one: binding a capability's *parameter* as though it were an
+    input port -- `with: {accession: ...}` on a step that declares no inputs at
+    all. Left alone it sends the curator off to open a file called SRR000001 and
+    the run is blocked for a missing path that was never a path.
+    """
+    for step in wf.get("steps", []) or []:
+        try:
+            cap = registry.get(step.get("capability", ""))
+        except Exception:  # noqa: BLE001 - an unknown capability is caught later
+            continue
+        ports = {port.name for port in cap.inputs}
+        declared = set(cap.params or {})
+        moved = {}
+        for name in list((step.get("with") or {})):
+            if name not in ports and name in declared:
+                moved[name] = step["with"].pop(name)
+        if moved:
+            step.setdefault("params", {}).update(moved)
+    return wf
+
+
+def file_params(registry: Registry, wf: dict[str, Any]) -> set[str]:
+    """Workflow parameters that really do name a file.
+
+    Read off the capability's input ports rather than off the template, so a
+    plan that mislabels a parameter cannot turn it into a path.
+    """
+    out: set[str] = set()
+    for step in wf.get("steps", []) or []:
+        try:
+            cap = registry.get(step.get("capability", ""))
+        except Exception:  # noqa: BLE001
+            continue
+        ports = {port.name for port in cap.inputs}
+        for name, binding in (step.get("with") or {}).items():
+            if name in ports:
+                out.update(PARAM_REF.findall(str(binding)))
+    return out
+
+
+# Words in a goal that mean "the data is not here yet".
+FETCH_WORDS = ("fetch", "download", "pull", "retrieve", "accession", "online",
+               "from ena", "from sra", "public")
+
+
 class Planner(Agent):
     """You design bioinformatics workflows. You are given a goal and a catalogue
     of installed capabilities. You select the minimum set of steps that reaches
@@ -76,10 +159,19 @@ class Planner(Agent):
         if start_type and goal_type:
             chain = plan_by_types(self.ctx.registry, start_type, goal_type, domain)
             if chain:
+                # If the operator asked for the data to be fetched, the chain has
+                # to start with something that can fetch it -- otherwise the plan
+                # quietly assumes a file that nobody has.
+                if any(word in goal.lower() for word in FETCH_WORDS):
+                    src = source_for(self.ctx.registry, start_type, domain)
+                    if src and src not in chain:
+                        chain = [src, *chain]
                 wf = self._linear_workflow(goal or f"{start_type}-to-{goal_type}", chain)
 
         if wf is None and self.provider is not None:
             wf = self._llm_workflow(goal, domain)
+            if wf:
+                wf = repair_plan(self.ctx.registry, wf)
 
         if wf is None:
             candidates = [c.id for c in self.ctx.registry.search(goal, domain)[:8]]
@@ -126,7 +218,18 @@ class Planner(Agent):
                     binding[port.name] = f"{{{{ params.{port.name} }}}}"
                     params.setdefault(port.name, None)
 
+            # A capability whose own parameters have no usable default -- an
+            # accession, a URL -- is asking the operator a question. Promoting
+            # them to workflow parameters is what makes that question visible
+            # instead of failing inside a container later.
+            step_params: dict[str, Any] = {}
+            for name, default in (cap.params or {}).items():
+                if default in ("", None):
+                    step_params[name] = f"{{{{ params.{name} }}}}"
+                    params.setdefault(name, None)
+
             steps.append({"id": cap_id, "capability": cap_id, "with": binding,
+                          "params": step_params,
                           "needs": [prev] if prev else [],
                           "description": cap.summary})
             prev = cap_id
@@ -408,6 +511,25 @@ class Runner(Agent):
     # purpose rather than by default.
     default_autonomy = Autonomy.BOUNDED
 
+    def _demanded_params(self, raw: dict[str, Any]) -> set[str]:
+        """Parameters the capabilities themselves declare with no usable default.
+
+        A fetch step whose `accession` defaults to "" will run, contact a
+        server, and fail somewhere inside a container -- which reads as a broken
+        tool rather than as a question nobody answered.
+        """
+        wanted: set[str] = set()
+        for step in raw.get("steps", []) or []:
+            try:
+                cap = self.ctx.registry.get(step.get("capability", ""))
+            except Exception:  # noqa: BLE001 - an unknown capability fails later
+                continue
+            given = set(step.get("params", {}) or {})
+            for name, default in (cap.params or {}).items():
+                if default in ("", None) and name not in given:
+                    wanted.add(name)
+        return wanted
+
     def handle(self, msg: Message) -> dict[str, Any]:
         raw = msg.body.get("workflow") or {}
         if not raw or not raw.get("steps"):
@@ -419,9 +541,23 @@ class Runner(Agent):
         # declared: a plan that binds `{{ params.reads }}` with no `reads` in
         # sight fails at the first step with a template error, which reads like
         # a tool problem rather than a missing input.
-        unbound = sorted({k for k, v in params.items() if v is None}
-                         | (_referenced_params(raw) - {k for k, v in params.items()
-                                                       if v is not None}))
+        # A workflow-level parameter the capability declares is meant for that
+        # step: the operator says `accession=SRR000001` once, not once per step.
+        steps = raw.get("steps", []) or []
+        for step in steps:
+            try:
+                cap = self.ctx.registry.get(step.get("capability", ""))
+            except Exception:  # noqa: BLE001
+                continue
+            for name in (cap.params or {}):
+                if name in params and params[name] not in (None, ""):
+                    step.setdefault("params", {}).setdefault(name, params[name])
+
+        supplied = {k for k, v in params.items() if v not in (None, "")}
+        unbound = sorted(
+            {k for k, v in params.items() if v is None}
+            | (_referenced_params(raw) - supplied)
+            | (self._demanded_params(raw) - supplied))
         if unbound:
             # Running a pipeline with holes in it wastes a queue slot and
             # produces a failure that looks like a tool problem.
@@ -454,7 +590,8 @@ class PI(Agent):
     and you stop the mission when a QC gate fails rather than pushing through."""
 
     role = "pi"
-    subscribes = ("goal", "mission", "plan.request.result", "data.validate.result")
+    subscribes = ("goal", "mission", "plan.request.result", "data.validate.result",
+                  "run.request.result")
     default_autonomy = Autonomy.BOUNDED
 
     # The topic that actually gives each role work. A PI may only hand out jobs
@@ -490,13 +627,40 @@ class PI(Agent):
         "required": ["orders"],
     }
 
+    def act_on_directive(self, order: str, msg: Message) -> dict[str, Any] | None:
+        """An order to the lab is a mission. The PI's part of obeying it is to
+        put everyone to work before it answers for itself.
+
+        `ask_idle=False` matters: an order already collects a verdict from every
+        agent, so asking the same six colleagues what they think as well bought
+        seven more essays and no work.
+        """
+        if not order:
+            return None
+        return self._dispatch(order, {**msg.body, "goal": order}, msg.sender,
+                              ask_idle=False)
+
     def handle(self, msg: Message) -> dict[str, Any]:
         if msg.topic == "plan.request.result":
             return self._on_plan(msg)
         if msg.topic == "data.validate.result":
             return self._on_curation(msg)
+        if msg.topic == "run.request.result":
+            return self._on_run(msg)
 
         goal = msg.body.get("goal") or msg.body.get("question") or msg.body.get("note", "")
+        return self._dispatch(goal, msg.body, msg.sender)
+
+    def _dispatch(self, goal: str, body: dict[str, Any], asked_by: str,
+                  ask_idle: bool = True) -> dict[str, Any]:
+        # Anything the operator wrote as key=value is a parameter, and travels
+        # with the mission from here on.
+        given = {**params_in(goal), **(body.get("params") or {})}
+        if given:
+            body = {**body, "params": given}
+            self.publish("mission/params", given)
+        msg = Message(id="", sender=asked_by, recipient=self.name,
+                      topic="goal", body=body)
         self.remember(f"Mission requested: {goal}", heading="mission")
 
         staffed = {a["role"]: a["name"] for a in self.hive.roster()
@@ -516,6 +680,10 @@ class PI(Agent):
             seen.add(role)
             who = staffed[role]
             topic = self._task_for(role, msg.body)
+            if topic == self.PEER_ASK and not ask_idle:
+                # Nothing for this role to do yet and its opinion is already on
+                # the record. Saying nothing is cheaper and just as useful.
+                continue
             if topic == self.PEER_ASK:
                 # Nothing for this role to work on yet, so it is asked rather
                 # than handed a job it would have to invent the inputs for.
@@ -601,6 +769,19 @@ class PI(Agent):
         steps = wf.get("steps", []) or []
         self.publish("mission/plan", {"workflow": wf.get("name"),
                                       "steps": [s.get("capability") for s in steps]})
+
+        # A plan with holes in it cannot run, and no amount of discussion among
+        # the agents can fill them. Ask the one person who knows.
+        given = self.hive.blackboard.get("mission/params") or {}
+        if given:
+            wf["params"] = {**(wf.get("params") or {}), **given}
+        unbound = sorted(k for k, v in (wf.get("params") or {}).items()
+                         if v in (None, ""))
+        if unbound:
+            self.needs_from_operator(unbound, wf)
+            return {"ok": False, "reason": "waiting on the operator",
+                    "workflow": wf.get("name"), "needs": unbound,
+                    "steps": [s.get("capability") for s in steps]}
         self.remember("Plan accepted: "
                       + " -> ".join(s.get("capability", "?") for s in steps),
                       heading=f"plan {wf.get('name', '')}")
@@ -616,15 +797,48 @@ class PI(Agent):
         self.publish("mission/workflow", wf)
         curator = self.hive.whois("curator")
         if curator:
-            self.send(curator, "data.validate", inputs=wf.get("params") or {},
+            # Only the parameters that are bound to an input *port* are files.
+            # An accession or a max-read count is not a path, and handing the
+            # curator one gets the run blocked for a missing file that was never
+            # supposed to exist.
+            files = file_params(self.ctx.registry, wf)
+            self.send(curator, "data.validate",
+                      inputs={k: v for k, v in (wf.get("params") or {}).items()
+                              if k in files and v},
                       types={}, workflow=wf.get("name"),
-                      instruction="Check the inputs for the plan before it runs.")
+                      instruction="Check the input files for the plan before it runs.")
             next_step = f"{curator} is checking the inputs"
         else:
             next_step = self._dispatch_run(wf, "no curator on the roster")
         return {"ok": True, "workflow": wf.get("name"),
                 "steps": [s.get("capability") for s in steps],
                 "handed_to": scribe or "(no scribe)", "next": next_step}
+
+    def needs_from_operator(self, needs: list[str], wf: dict[str, Any]) -> None:
+        """One precise question to the human, instead of a conversation."""
+        chain = " -> ".join(s.get("capability", "?") for s in wf.get("steps", []))
+        self.publish("mission/held", {"workflow": wf.get("name"), "needs": needs})
+        self.send(self.OPERATOR, "needs",
+                  workflow=wf.get("name"), needs=needs, steps=chain,
+                  line=(f"I can run {chain}, but I need you to supply "
+                        f"{', '.join(needs)}. Send them straight back as an "
+                        f"order: bioharness order \"run {wf.get('name')} with "
+                        + " ".join(f"{n}=<value>" for n in needs) + "\""))
+        self.remember(f"Held {wf.get('name')}: waiting on {', '.join(needs)}",
+                      heading="held")
+
+    def _on_run(self, msg: Message) -> dict[str, Any]:
+        """The runner has reported. A refusal for want of inputs goes straight
+        to the operator rather than round the room again."""
+        if msg.body.get("ok"):
+            return {"ok": True, "run_id": msg.body.get("run_id"),
+                    "status": msg.body.get("status"), "dir": msg.body.get("dir")}
+        needs = msg.body.get("needs") or []
+        if needs:
+            self.needs_from_operator(
+                needs, self.hive.blackboard.get("mission/workflow") or {})
+        return {"ok": False, "reason": msg.body.get("reason", "the run did not start"),
+                "needs": needs, "refused": msg.body.get("refused") or []}
 
     def _on_curation(self, msg: Message) -> dict[str, Any]:
         """The curator has ruled on the inputs. Only a pass reaches the runner."""
@@ -645,6 +859,7 @@ class PI(Agent):
             self.hive.event("agent.no_peer", {"agent": self.name, "wanted": "runner"})
             return "nobody is hired to run it"
         self.send(runner, "run.request", workflow=wf, why=why,
+                  params=self.hive.blackboard.get("mission/params") or {},
                   instruction="Execute this workflow as planned.")
         return f"handed to {runner} to execute ({why})"
 

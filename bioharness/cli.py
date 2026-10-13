@@ -16,6 +16,7 @@ from .agents.api_provider import (APIProvider, MODELS, credentials_present,
                                   make_provider)
 from .agents.base import AgentContext, CLIProvider
 from .agents.roles import ROLES, plan_by_types
+from .core.brief import gather, orders, render
 from .core.guardrails import Budget, Guardrails, GuardrailTripped
 from .core.hive import Hive
 from .core.loader import find_workflow, load_workflow
@@ -180,7 +181,8 @@ def cmd_mission(args: argparse.Namespace) -> int:
         agents = [ROLES[name](name, ctx, provider=provider) for name in args.roles]
         names = list(args.roles)
     else:
-        roster = [a for a in hive.roster() if a.get("role") in ROLES]
+        roster = [a for a in hive.roster() if a.get("role") in ROLES
+            and (only is None or a["name"] in only)]
         if not roster:
             print(color("nobody hired. Use --roles, or: "
                         "bioharness staff hire ada --role planner", "red"))
@@ -217,10 +219,11 @@ def cmd_mission(args: argparse.Namespace) -> int:
     return 0
 
 
-def roster_agents(hive: Hive, ctx: AgentContext) -> list[Any]:
+def roster_agents(hive: Hive, ctx: AgentContext, only: list[str] | None = None) -> list[Any]:
     """Instantiate whoever is hired, each with the provider it was hired with."""
     return [ROLES[a["role"]](a["name"], ctx, provider=provider_for(a))
-            for a in hive.roster() if a.get("role") in ROLES]
+            for a in hive.roster() if a.get("role") in ROLES
+            and (only is None or a["name"] in only)]
 
 
 def roster_key(hive: Hive) -> str:
@@ -273,7 +276,8 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
            interval: float = 2.0, stop: threading.Event | None = None,
            quiet: bool = False, social_every: float = 180.0,
            seed: int | None = None, runs: str | None = None,
-           dry_run: bool = False) -> None:
+           dry_run: bool = False, brief_after: float = 20.0,
+           only: list[str] | None = None) -> None:
     """Keep the hired roster running: route mail, tick everyone, repeat.
 
     Posting a message from the dashboard only drops it into a mailbox --
@@ -291,6 +295,9 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
     agents: list[Any] = []
     key = None
     rng = random.Random(seed)
+    # Orders that already have a brief. Seeded from the log so a restart does
+    # not re-issue a document for every order the lab has ever been given.
+    briefed = {e["payload"].get("thread") for e in hive.events("brief.written")}
     # Nobody greets the people who were already in the room when the lights came
     # on -- only someone who arrives while the lab is running.
     known = {a["name"] for a in hive.roster()}
@@ -298,7 +305,7 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
     while not (stop and stop.is_set()):
         current = roster_key(hive)
         if current != key:
-            agents = roster_agents(hive, ctx)
+            agents = roster_agents(hive, ctx, only=only)
             key = current
             if not quiet:
                 print(color(f"  attending {len(agents)} agent(s): "
@@ -324,12 +331,69 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
         if handled and not quiet:
             print(color(f"  {time.strftime('%H:%M:%S')}  handled {handled} message(s)",
                         "dim"))
+        if brief_after:
+            for thread in settled_orders(hive, briefed, brief_after):
+                briefed.add(thread)
+                try:
+                    write_brief(hive, thread, runs, quiet=quiet)
+                except Exception as exc:  # noqa: BLE001 - a failed brief is not fatal
+                    hive.event("brief.failed", {"thread": thread, "error": repr(exc)})
+                    print(color(f"  brief failed: {exc}", "red"))
+
         # Only when the room is otherwise quiet: gossip never delays the work,
         # and a busy lab has no time for it anyway.
         if social_every and not handled and time.time() - last_social >= social_every:
             gossip(hive, agents, rng, quiet=quiet)
             last_social = time.time()
         time.sleep(interval)
+
+
+def write_brief(hive: Hive, thread: str, runs: str | None,
+                quiet: bool = False) -> Path | None:
+    """Render one order's verdict brief, and tell the operator where it is."""
+    brief = gather(hive, thread)
+    if not brief:
+        return None
+    out = Path(runs or DEFAULT_RUNS) / "briefs"
+    pdf = render(brief, out)
+    hive.event("brief.written", {"thread": thread, "path": str(pdf),
+                                 "verdicts": len(brief.get("verdicts", []))})
+    # It lands in the operator's own mailbox, so the brief shows up in the
+    # conversation next to the order that caused it.
+    hive.send("system", "human", "brief",
+              {"thread": thread, "path": str(pdf),
+               "order": brief.get("order", ""),
+               "verdicts": len(brief.get("verdicts", [])),
+               "line": f"Verdict brief ready: {len(brief.get('verdicts', []))} "
+                       f"verdict(s) on \"{brief.get('order', '')[:70]}\""},
+              thread=thread)
+    if not quiet:
+        print(color(f"  brief written: {pdf}", "green"))
+    return pdf
+
+
+def settled_orders(hive: Hive, done: set[str], settle_after: float) -> list[str]:
+    """Orders whose thread has gone quiet, and which have no mail still moving.
+
+    A brief written while agents are still answering would be half a record, so
+    it waits for silence rather than for a fixed number of replies.
+    """
+    now = time.time()
+    # The operator's own mailbox is not a sign of life: nothing consumes it, so
+    # counting it means the lab never looks quiet and no brief is ever written.
+    if any(a.get("inbox_pending") for a in hive.roster()
+           if a.get("role") != "operator"):
+        return []
+    ready = []
+    for order in orders(hive):
+        thread = order["thread"]
+        if thread in done:
+            continue
+        last = max((float(m.get("ts", 0.0)) for m in hive.transcript(limit=4000)
+                    if m.get("thread") == thread), default=0.0)
+        if last and now - last >= settle_after:
+            ready.append(thread)
+    return ready
 
 
 def cmd_attend(args: argparse.Namespace) -> int:
@@ -343,7 +407,9 @@ def cmd_attend(args: argparse.Namespace) -> int:
     try:
         attend(args.hive, args.capabilities, max_usd=args.max_usd,
                interval=args.interval, runs=args.runs, dry_run=args.dry_run,
-               social_every=0 if args.no_social else args.social_every)
+               brief_after=0 if args.no_brief else args.brief_after,
+               social_every=0 if args.no_social else args.social_every,
+               only=args.only)
     except KeyboardInterrupt:
         print("\n  stopped")
     return 0
@@ -362,8 +428,10 @@ def cmd_ui(args: argparse.Namespace) -> int:
         # another terminal.
         threading.Thread(target=attend, daemon=True,
                          args=(args.hive, args.capabilities),
-                         kwargs={"max_usd": args.max_usd, "quiet": True,
+                         kwargs={"max_usd": args.max_usd, "quiet": True, "only": args.only,
                                  "runs": args.runs, "dry_run": args.dry_run,
+                                 "brief_after": (0 if args.no_brief
+                                                 else args.brief_after),
                                  "social_every": (0 if args.no_social
                                                   else args.social_every)}).start()
         print(color("  attending: messages sent from the dashboard will be "
@@ -457,6 +525,42 @@ def cmd_staff(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_order(args: argparse.Namespace) -> int:
+    """The operator speaking to the whole lab. Every agent owes it a verdict."""
+    from .server import Dashboard
+    dash = Dashboard(runs=Path(args.runs), hive_root=Path(args.hive),
+                     capabilities=[Path(p) for p in args.capabilities])
+    result = dash.send_message(to=args.to, topic="directive",
+                               body={"order": args.order})
+    if not result.get("ok"):
+        print(color(f"error: {result['error']}", "red"))
+        return 1
+    print(color(f"order issued to {args.to}", "green"))
+    print(f"  thread {result['thread']}")
+    print(color("  every agent will answer with a verdict; the brief is written "
+                "once the room goes quiet", "dim"))
+    print(color(f"  bioharness brief {result['thread']}", "dim"))
+    return 0
+
+
+def cmd_brief(args: argparse.Namespace) -> int:
+    hive = Hive(args.hive)
+    thread = args.thread
+    if thread in ("", "latest", None):
+        given = orders(hive)
+        if not given:
+            print(color("no orders have been given yet. Try: "
+                        "bioharness order \"...\"", "red"))
+            return 1
+        thread = given[-1]["thread"]
+    pdf = write_brief(hive, thread, args.runs)
+    if pdf is None:
+        print(color(f"nothing happened under {thread!r}", "red"))
+        return 1
+    print(color(f"wrote {pdf}", "green"))
+    return 0
+
+
 def cmd_status(args: argparse.Namespace) -> int:
     hive = Hive(args.hive)
     print(color("HIVE", "bold"))
@@ -526,6 +630,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
 
 # -- parser ----------------------------------------------------------------
+def add_brief_args(c: argparse.ArgumentParser) -> None:
+    """Every order the operator gives ends up as a PDF, unless they say not to."""
+    c.add_argument("--brief-after", type=float, default=20.0, metavar="SECONDS",
+                   help="how long an order's thread must be quiet before its "
+                        "verdict brief is written (default 20)")
+    c.add_argument("--no-brief", action="store_true",
+                   help="do not write verdict briefs")
+
+
 def add_social_args(c: argparse.ArgumentParser) -> None:
     """Off-topic talk costs tokens like anything else, so it is on a timer the
     operator can slow down or switch off."""
@@ -589,6 +702,18 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--dry-run", action="store_true")
     c.set_defaults(func=cmd_mission)
 
+    c = sub.add_parser("order", help="give the whole lab an order and collect "
+                                    "a verdict from every agent")
+    c.add_argument("order")
+    c.add_argument("--to", default="*",
+                   help="who the order goes to; default is everyone")
+    c.set_defaults(func=cmd_order)
+
+    c = sub.add_parser("brief", help="render an order's verdict brief as a PDF")
+    c.add_argument("thread", nargs="?", default="latest",
+                   help="the order's thread id, or `latest`")
+    c.set_defaults(func=cmd_brief)
+
     c = sub.add_parser("attend", help="keep the hired roster running: route mail "
                                      "and tick every agent until stopped")
     c.add_argument("--interval", type=float, default=2.0,
@@ -598,6 +723,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="agents may plan and dispatch runs, but every step is "
                         "resolved and skipped rather than executed")
     add_social_args(c)
+    add_brief_args(c)
+    c.add_argument("--only", nargs="+", help="only run these named agents; leave other inboxes pending")
     c.set_defaults(func=cmd_attend)
 
     c = sub.add_parser("ui", help="serve the local dashboard")
@@ -609,10 +736,12 @@ def build_parser() -> argparse.ArgumentParser:
     c.add_argument("--dry-run", action="store_true",
                    help="with --attend: resolve every step and execute nothing")
     add_social_args(c)
+    add_brief_args(c)
     c.add_argument("--port", type=int, default=8765)
     c.add_argument("--host", default="127.0.0.1",
                    help="loopback by default; the dashboard is read-only either way")
     c.add_argument("--no-open", action="store_true", help="do not open a browser")
+    c.add_argument("--only", nargs="+", help="with --attend: only run these named agents")
     c.set_defaults(func=cmd_ui)
 
     c = sub.add_parser("staff", help="hire, list or dismiss agents")

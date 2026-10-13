@@ -410,3 +410,61 @@ def test_a_tasking_message_says_what_the_agent_was_told(live):
                       "instruction": "Draft Methods for the planned pipeline."})
     assert get(base, "/api/conversation")[-1]["say"] == \
         "Draft Methods for the planned pipeline."
+
+
+def test_static_rejects_sibling_with_matching_directory_prefix(live, tmp_path, monkeypatch):
+    """A sibling named ui-private must not pass the UI directory boundary."""
+    import bioharness.server as server_module
+
+    _, base, _ = live
+    ui = tmp_path / 'ui'
+    ui.mkdir()
+    sibling = tmp_path / 'ui-private'
+    sibling.mkdir()
+    (sibling / 'secret.txt').write_text('private')
+    monkeypatch.setattr(server_module, 'UI_DIR', ui)
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(base + '/../ui-private/secret.txt')
+    assert exc.value.code == 404
+
+
+def test_malformed_post_payloads_return_json_errors(live):
+    _, base, _ = live
+    for route, payload in [('/api/message', []), ('/api/message', {'to': 'pi', 'body': 'bad'}),
+                           ('/api/staff/hire', {'name': 123}),
+                           ('/api/staff/assign', {'names': 'pi'}),
+                           ('/api/staff/assign', {'scope': [None]}),
+                           ('/api/staff/fire', None)]:
+        req = urllib.request.Request(base + route, data=json.dumps(payload).encode(),
+                                     headers={'Content-Type': 'application/json'})
+        with pytest.raises(urllib.error.HTTPError) as exc:
+            urllib.request.urlopen(req, timeout=5)
+        assert exc.value.code == 400
+        assert json.loads(exc.value.read())['ok'] is False
+    assert get(base, '/api/floor')['agents']  # the server remains responsive
+
+
+def test_negative_and_oversized_content_length_are_rejected(live):
+    import http.client
+    from urllib.parse import urlparse
+    _, base, _ = live
+    for length, status in [(-1, 400), (1024 * 1024 + 1, 413)]:
+        connection = http.client.HTTPConnection(urlparse(base).netloc, timeout=3)
+        connection.request('POST', '/api/message', body=b'', headers={'Content-Length': str(length)})
+        response = connection.getresponse()
+        assert response.status == status
+        assert json.loads(response.read())['ok'] is False
+        connection.close()
+
+
+def test_post_backend_exception_is_returned_as_json(live, monkeypatch):
+    dash, base, _ = live
+    def fail(*args, **kwargs):
+        raise OSError('temporary storage failure')
+    monkeypatch.setattr(dash, 'fire', fail)
+    request = urllib.request.Request(base + '/api/staff/fire', data=b'{"name":"pi"}',
+                                     headers={'Content-Type': 'application/json'})
+    with pytest.raises(urllib.error.HTTPError) as exc:
+        urllib.request.urlopen(request, timeout=5)
+    assert exc.value.code == 500
+    assert 'temporary storage failure' in json.loads(exc.value.read())['error']
