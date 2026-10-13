@@ -3,6 +3,9 @@
 A pluggable multi-agent harness for bioinformatics, built around scientific
 pipelines.
 
+**[Live demo](https://dadabsdk.github.io/bioinfo-harness/)**: a recorded lab
+session replayed in your browser. No install needed.
+
 Agent CLIs are wrapped as named lab members who share a memory palace, talk over
 file mailboxes, and work inside isolated run workspaces. **The substrate is a
 capability registry**: any tool becomes available to the agents by
@@ -22,6 +25,22 @@ budgets and provenance. It never knows about a specific tool.
             fastqc, fastp     pdb_fetch, gmx      multiqc, metrics
             bwa, bcftools     vina, MDAnalysis
 ```
+
+## Demo site
+
+The [live demo](https://dadabsdk.github.io/bioinfo-harness/) is the real
+dashboard served as a static page. `demo/demo.js` answers its API calls from a
+recorded snapshot in `demo/data/` and replays the conversation, so the lab
+moves as it did live. Sending a message works locally in the page; hiring is
+disabled.
+
+```bash
+python tools/build_demo.py record     # re-record demo/data (needs Ollama + qwen2.5:3b)
+python tools/build_demo.py site _site # assemble the static site
+```
+
+The `Demo site` workflow builds and deploys it to GitHub Pages on every push to
+`main`. Host names, user names and local paths are scrubbed from the snapshot.
 
 ## Install
 

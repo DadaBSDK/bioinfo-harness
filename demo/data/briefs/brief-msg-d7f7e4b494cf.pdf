@@ -1,0 +1,246 @@
+%PDF-1.4
+%‚„œ”
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+2 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Oblique /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 4902 >>
+stream
+BT /F2 17.0 Tf 0.00 g 56.0 785.9 Td (Verdict brief) Tj ET
+BT /F1 10.0 Tf 0.40 g 56.0 762.9 Td (Every agent's position on one order from the operator, with what was run because of it.) Tj ET
+0.75 G 0.7 w 56.0 744.4 m 539.3 744.4 l S
+BT /F2 11.5 Tf 0.00 g 56.0 734.4 Td (Outcome) Tj ET
+BT /F1 10.0 Tf 0.00 g 56.0 718.4 Td (1 run\(s\) started and none finished clean. Nothing usable was produced.) Tj ET
+0.75 G 0.7 w 56.0 699.9 m 539.3 699.9 l S
+BT /F2 11.5 Tf 0.00 g 56.0 689.9 Td (The order) Tj ET
+BT /F3 10.5 Tf 0.20 g 68.0 673.9 Td (Fetch Illumina reads for ENA run SRR2584863 and call variants against the E. coli REL606) Tj ET
+BT /F3 10.5 Tf 0.20 g 68.0 659.9 Td (reference. accession=SRR2584863) Tj ET
+BT /F3 10.5 Tf 0.20 g 68.0 645.9 Td (url=https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/017/985/GCF_000017985.1_ASM1798v1/G-) Tj ET
+BT /F3 10.5 Tf 0.20 g 68.0 631.9 Td (CF_000017985.1_ASM1798v1_genomic.fna.gz) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 611.9 Td (issued to) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 611.9 Td (*) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 597.9 Td (issued) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 597.9 Td (2026-10-14 01:20:20) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 583.9 Td (settled) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 583.9 Td (2026-10-14 01:21:15) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 569.9 Td (messages) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 569.9 Td (19) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 555.9 Td (thread) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 555.9 Td (msg-d7f7e4b494cf) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 535.9 Td (Verdicts) Tj ET
+0.75 G 0.7 w 56.0 519.9 m 539.3 519.9 l S
+BT /F1 10.0 Tf 0.15 g 56.0 513.9 Td (4 will do with caveats, 3 will do) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 495.4 Td (ada \(planner\) - will do with caveats) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 479.4 Td (Fetch Illumina reads for ENA run SRR2584863 and call variants against the E. coli REL606) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 465.9 Td (reference. Ensure Illumina reads are aligned to the reference genome using STAR aligner. Use) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 452.4 Td (BWA-MEM for variant calling. Verify the alignment and variant calling steps with QC metrics.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 433.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 433.9 Td (needs: I) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 418.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 418.4 Td (needs: r) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 402.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 402.9 Td (needs: i) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 387.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 387.4 Td (needs: s) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 371.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 371.9 Td (needs:) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 356.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 356.4 Td (needs: \() Tj ET
+BT /F1 10 Tf 0.15 g 60.0 340.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 340.9 Td (risk: Inadequate QC metrics may lead to false positives or negatives in variant calling.) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 325.4 Td (iris \(curator\) - will do with caveats) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 309.4 Td (Download the reference genome file GCF_000017985.1_ASM1798v1_genomic.fna.gz from the provided) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 295.9 Td (URL, verify its integrity, and proceed with the Illumina reads SRR2584863 for variant calling) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 282.4 Td (against the reference. Ensure the reference genome is compatible with the Illumina platform used) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 268.9 Td (for SRR2584863.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 250.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 250.4 Td (needs: V) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 234.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 234.9 Td (needs: e) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 219.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 219.4 Td (needs: r) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 203.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 203.9 Td (needs: a) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 188.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 188.4 Td (needs: ') Tj ET
+BT /F1 10 Tf 0.15 g 60.0 172.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 172.9 Td (needs: s) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 157.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 157.4 Td (risk: The reference genome may not be compatible with the Illumina sequencing data, leading) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 143.9 Td (to potential variant calling errors.) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 128.4 Td (quill \(scribe\) - will do with caveats) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 112.4 Td (Fetch Illumina reads for ENA run SRR2584863 and call variants against the E. coli REL606) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 98.9 Td (reference. Will use the curator's benchtop sequencer and the validator's sample fridge for) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 85.4 Td (storage and processing. Will consult the analyst for guidance on variant calling software and) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 71.9 Td (the runner for compute resources. Will need to check the freezer's temperamental alarm and the) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R /F4 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 4865 >>
+stream
+BT /F1 10.0 Tf 0.15 g 56.0 785.9 Td (sample fridge's capacity.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 767.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 767.4 Td (needs: a) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 751.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 751.9 Td (needs: n) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 736.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 736.4 Td (needs: a) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 720.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 720.9 Td (needs: l) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 705.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 705.4 Td (needs: y) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 689.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 689.9 Td (needs: s) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 674.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 674.4 Td (risk: The freezer's temperamental alarm could cause delays or errors if not properly) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 660.9 Td (addressed.) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 645.4 Td (rex \(runner\) - will do with caveats) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 629.4 Td (\(no structured answer came back\)) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 610.9 Td (hugo \(pi\) - will do) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 594.9 Td (Fetch Illumina reads for SRR2584863 and prepare for variant calling. Contact ada for sequencing) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 581.4 Td (plan.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 562.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 562.9 Td (needs: a) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 547.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 547.4 Td (needs: d) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 531.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 531.9 Td (needs: a) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 516.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 516.4 Td (needs:) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 500.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 500.9 Td (needs: f) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 485.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 485.4 Td (needs: o) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 469.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 469.9 Td (risk: unaltered Illumina reads may not align well with the reference, leading to variant) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 456.4 Td (calling errors.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 440.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 440.9 Td (dispatched: ada \(plan.request\)) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 425.4 Td (nova \(analyst\) - will do) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 409.4 Td (Fetch Illumina reads for ENA run SRR2584863 and call variants against the E. coli REL606) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 395.9 Td (reference using the provided URL. Ensure the Illumina reads are aligned to the reference genome) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 382.4 Td (and variants are called accordingly.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 363.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 363.9 Td (needs: I) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 348.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 348.4 Td (needs: r) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 332.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 332.9 Td (needs: i) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 317.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 317.4 Td (needs: s) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 301.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 301.9 Td (needs:) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 286.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 286.4 Td (needs: \() Tj ET
+BT /F1 10 Tf 0.15 g 60.0 270.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 270.9 Td (risk: The Illumina reads may not be available or may contain errors, leading to failed) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 257.4 Td (alignment or variant calling.) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 241.9 Td (vera \(validator\) - will do) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 225.9 Td (Fetch Illumina reads for ENA run SRR2584863 and call variants against the E. coli REL606) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 212.4 Td (reference using the provided accession and URL. Ensure Illumina adapter trimming and quality) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 198.9 Td (filtering are applied. Verify the reference genome integrity and completeness. Monitor the) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 185.4 Td (computational resources and storage space to avoid any run failures due to resource constraints.) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 166.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 166.9 Td (needs: N) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 151.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 151.4 Td (needs: o) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 135.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 135.9 Td (needs: v) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 120.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 120.4 Td (needs: a) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 104.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 104.9 Td (needs: ') Tj ET
+BT /F1 10 Tf 0.15 g 60.0 89.4 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 89.4 Td (needs: s) Tj ET
+BT /F1 10 Tf 0.15 g 60.0 73.9 Td (-) Tj ET
+BT /F1 10.0 Tf 0.00 g 72.0 73.9 Td (risk: Insufficient storage space for the large Illumina reads and variant calling outputs.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R /F4 4 0 R >> >> /Contents 7 0 R >>
+endobj
+9 0 obj
+<< /Length 2202 >>
+stream
+BT /F2 11.5 Tf 0.00 g 56.0 785.9 Td (Spoke, but returned no verdict) Tj ET
+0.75 G 0.7 w 56.0 769.9 m 539.3 769.9 l S
+BT /F2 11.5 Tf 0.00 g 56.0 763.9 Td (system) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 747.9 Td (Verdict brief ready: 7 verdict\(s\) on "Fetch Illumina reads for ENA run SRR2584863 and call) Tj ET
+BT /F1 10.0 Tf 0.15 g 56.0 734.4 Td (variants against ") Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 715.9 Td (What ran) Tj ET
+0.75 G 0.7 w 56.0 699.9 m 539.3 699.9 l S
+BT /F2 11.5 Tf 0.00 g 56.0 693.9 Td (Variant Calling Workflow - failed) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 677.9 Td (run) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 677.9 Td (run-4b825237d356) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 663.9 Td (steps) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 663.9 Td (step1:skipped, step2:failed) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 649.9 Td (seconds) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 649.9 Td (0.0) Tj ET
+BT /F4 8.5 Tf 0.30 g 68.0 635.9 Td (~/lab/runs/run-4b825237d356) Tj ET
+BT /F2 11.5 Tf 0.00 g 56.0 620.4 Td (What it cost) Tj ET
+0.75 G 0.7 w 56.0 604.4 m 539.3 604.4 l S
+BT /F1 10.0 Tf 0.15 g 56.0 598.4 Td (20,364 tokens across 13 model calls, $0.0000 priced.) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 579.9 Td (ada) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 579.9 Td (2 calls, 3,362 in / 516 out) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 565.9 Td (hugo) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 565.9 Td (3 calls, 4,812 in / 156 out) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 551.9 Td (iris) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 551.9 Td (4 calls, 5,463 in / 275 out) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 537.9 Td (nova) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 537.9 Td (1 calls, 1,320 in / 125 out) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 523.9 Td (quill) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 523.9 Td (1 calls, 1,313 in / 154 out) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 509.9 Td (rex) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 509.9 Td (1 calls, 1,327 in / 94 out) Tj ET
+BT /F2 9 Tf 0.35 g 56.0 495.9 Td (vera) Tj ET
+BT /F1 9.5 Tf 0.00 g 152.0 495.9 Td (1 calls, 1,309 in / 138 out) Tj ET
+0.75 G 0.7 w 56.0 471.9 m 539.3 471.9 l S
+BT /F1 10.0 Tf 0.45 g 56.0 461.9 Td (Generated by bioharness from the hive at 2026-10-14 01:24:20. Every line above is reconstructed) Tj ET
+BT /F1 10.0 Tf 0.45 g 56.0 448.4 Td (from messages on disk.) Tj ET
+endstream
+endobj
+10 0 obj
+<< /Type /Page /Parent 11 0 R /MediaBox [0 0 595.28 841.89] /Resources << /Font << /F1 1 0 R /F2 2 0 R /F3 3 0 R /F4 4 0 R >> >> /Contents 9 0 R >>
+endobj
+11 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R 10 0 R] /Count 3 >>
+endobj
+12 0 obj
+<< /Type /Catalog /Pages 11 0 R >>
+endobj
+13 0 obj
+<< /Title (Verdict brief - Fetch Illumina reads for ENA run SRR2584863 and call variant) /Subject (bioharness) /Producer (bioharness) /CreationDate (D:20261014012420+00'00') >>
+endobj
+xref
+0 14
+0000000000 65535 f 
+0000000015 00000 n 
+0000000112 00000 n 
+0000000214 00000 n 
+0000000319 00000 n 
+0000000414 00000 n 
+0000005368 00000 n 
+0000005531 00000 n 
+0000010448 00000 n 
+0000010611 00000 n 
+0000012865 00000 n 
+0000013029 00000 n 
+0000013100 00000 n 
+0000013151 00000 n 
+trailer
+<< /Size 14 /Root 12 0 R /Info 13 0 R >>
+startxref
+13344
+%%EOF

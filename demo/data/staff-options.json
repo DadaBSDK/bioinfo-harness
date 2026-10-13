@@ -1,0 +1,120 @@
+{
+ "roles": [
+  "pi",
+  "planner",
+  "curator",
+  "runner",
+  "validator",
+  "analyst",
+  "scribe"
+ ],
+ "providers": [
+  {
+   "id": "builtin",
+   "label": "builtin (deterministic, free)",
+   "available": true,
+   "reason": "no LLM calls",
+   "models": []
+  },
+  {
+   "id": "claude-api",
+   "label": "Claude API",
+   "available": false,
+   "reason": "no credentials: set ANTHROPIC_API_KEY or run `ant auth login`",
+   "models": [
+    "claude-opus-5",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-haiku-4-5",
+    "claude-fable-5-1"
+   ]
+  },
+  {
+   "id": "gemini-api",
+   "label": "Gemini API",
+   "available": false,
+   "reason": "discovering models\u2026",
+   "models": []
+  },
+  {
+   "id": "antigravity",
+   "label": "Antigravity CLI (agy)",
+   "available": false,
+   "reason": "discovering models\u2026",
+   "models": []
+  },
+  {
+   "id": "ollama",
+   "label": "Ollama (local, free)",
+   "available": true,
+   "reason": "3 model(s) local",
+   "models": [
+    "qwen2.5:3b",
+    "qwen3.5:latest",
+    "qwen3.8:27b"
+   ]
+  },
+  {
+   "id": "claude",
+   "label": "claude CLI",
+   "available": true,
+   "reason": "on PATH",
+   "models": []
+  },
+  {
+   "id": "codex",
+   "label": "codex CLI",
+   "available": true,
+   "reason": "on PATH",
+   "models": []
+  },
+  {
+   "id": "copilot",
+   "label": "copilot CLI",
+   "available": false,
+   "reason": "not on PATH",
+   "models": []
+  },
+  {
+   "id": "crush",
+   "label": "crush CLI",
+   "available": false,
+   "reason": "not on PATH",
+   "models": []
+  },
+  {
+   "id": "cursor",
+   "label": "cursor CLI",
+   "available": false,
+   "reason": "not on PATH",
+   "models": []
+  },
+  {
+   "id": "gemini",
+   "label": "gemini CLI",
+   "available": false,
+   "reason": "not on PATH",
+   "models": []
+  },
+  {
+   "id": "opencode",
+   "label": "opencode CLI",
+   "available": true,
+   "reason": "on PATH",
+   "models": []
+  },
+  {
+   "id": "qwen",
+   "label": "qwen CLI",
+   "available": false,
+   "reason": "not on PATH",
+   "models": []
+  }
+ ],
+ "autonomy": [
+  "read_only",
+  "suggest",
+  "bounded",
+  "full"
+ ]
+}

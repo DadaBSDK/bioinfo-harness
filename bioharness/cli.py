@@ -179,8 +179,7 @@ def cmd_mission(args: argparse.Namespace) -> int:
         agents = [ROLES[name](name, ctx, provider=provider) for name in args.roles]
         names = list(args.roles)
     else:
-        roster = [a for a in hive.roster() if a.get("role") in ROLES
-            and (only is None or a["name"] in only)]
+        roster = [a for a in hive.roster() if a.get("role") in ROLES]
         if not roster:
             print(color("nobody hired. Use --roles, or: "
                         "bioharness staff hire ada --role planner", "red"))

@@ -1,0 +1,11 @@
+[
+ {
+  "thread": "msg-d7f7e4b494cf",
+  "ts": 1791921020.495308,
+  "to": "*",
+  "topic": "directive",
+  "order": "Fetch Illumina reads for ENA run SRR2584863 and call variants against the E. coli REL606 reference. accession=SRR2584863 url=https://ftp.ncbi.nlm.nih.gov/genomes/all/GCF/000/017/985/GCF_000017985.1_ASM1798v1/GCF_000017985.1_ASM1798v1_genomic.fna.gz",
+  "pdf": "brief-msg-d7f7e4b494cf.pdf",
+  "bytes": 13361
+ }
+]

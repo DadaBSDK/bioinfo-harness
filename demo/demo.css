@@ -1,0 +1,18 @@
+/* Floating notice that this page is a recorded demo. */
+.demo-banner {
+  position: fixed; right: 16px; bottom: 16px; z-index: 5000;
+  display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px);
+  padding: 9px 10px 9px 14px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--panel); color: var(--ink); font-size: 12px;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .14);
+}
+.demo-banner a { color: var(--accent); font-weight: 600; text-decoration: none; white-space: nowrap; }
+.demo-banner a:hover { text-decoration: underline; }
+.demo-banner button {
+  border: 0; background: transparent; color: var(--muted); font-size: 16px;
+  line-height: 1; padding: 2px 6px; cursor: pointer; border-radius: 50%;
+}
+.demo-banner button:hover { color: var(--ink); }
+@media (max-width: 600px) {
+  .demo-banner { left: 16px; right: 16px; bottom: 80px; border-radius: 12px; flex-wrap: wrap; }
+}

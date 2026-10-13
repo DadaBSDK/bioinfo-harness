@@ -317,7 +317,7 @@
       "y": 269
     }
   },
-  "image": "/assets/atlas.png",
+  "image": "assets/atlas.png",
   "tiles": [
     "floor_grate",
     "floor_lino",

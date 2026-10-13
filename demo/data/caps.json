@@ -1,0 +1,634 @@
+[
+ {
+  "id": "metrics_extract",
+  "domain": "general",
+  "version": "0.1",
+  "summary": "Parse tool metric files into a flat metric table for QC gating",
+  "runtime": "python",
+  "available": true,
+  "reason": "import bioharness.tools.metrics ok",
+  "tags": [
+   "qc",
+   "parse",
+   "gating"
+  ],
+  "citation": "",
+  "inputs": [
+   {
+    "name": "source",
+    "type": "table",
+    "optional": false,
+    "multiple": true
+   }
+  ],
+  "outputs": [
+   {
+    "name": "metrics",
+    "type": "metrics",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 1,
+   "mem_gb": 1.0,
+   "gpu": 0,
+   "walltime_min": 10
+  }
+ },
+ {
+  "id": "multiqc",
+  "domain": "general",
+  "version": "1.21",
+  "summary": "Aggregate QC reports from many tools into one HTML summary",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "qc",
+   "report",
+   "aggregate"
+  ],
+  "citation": "Ewels P, et al. MultiQC. Bioinformatics. 2016.",
+  "inputs": [
+   {
+    "name": "reports",
+    "type": "dir",
+    "optional": false,
+    "multiple": true
+   }
+  ],
+  "outputs": [
+   {
+    "name": "summary",
+    "type": "html",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 2,
+   "mem_gb": 4.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "ref_fetch",
+  "domain": "general",
+  "version": "1.0",
+  "summary": "Download a reference genome FASTA from a URL",
+  "runtime": "python",
+  "available": true,
+  "reason": "import bioharness.tools.fetch ok",
+  "tags": [
+   "fetch",
+   "reference",
+   "genome"
+  ],
+  "citation": "",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "reference",
+    "type": "fasta",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 1,
+   "mem_gb": 2.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "bcftools_call",
+  "domain": "ngs",
+  "version": "1.19",
+  "summary": "Call small variants from an alignment",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "variants",
+   "snv"
+  ],
+  "citation": "Danecek P, et al. Twelve years of SAMtools and BCFtools. GigaScience. 2021.",
+  "inputs": [
+   {
+    "name": "bam",
+    "type": "bam",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "reference",
+    "type": "fasta",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "vcf",
+    "type": "vcf",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 4,
+   "mem_gb": 8.0,
+   "gpu": 0,
+   "walltime_min": 240
+  }
+ },
+ {
+  "id": "bwa_mem",
+  "domain": "ngs",
+  "version": "0.7.17",
+  "summary": "Align short reads to a reference genome",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "align",
+   "dna"
+  ],
+  "citation": "Li H. Aligning sequence reads with BWA-MEM. arXiv:1303.3997. 2013.",
+  "inputs": [
+   {
+    "name": "reads",
+    "type": "fastq",
+    "optional": false,
+    "multiple": true
+   },
+   {
+    "name": "reference",
+    "type": "fasta",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "bam",
+    "type": "bam",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "index",
+    "type": "bai",
+    "optional": true,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 8,
+   "mem_gb": 16.0,
+   "gpu": 0,
+   "walltime_min": 480
+  }
+ },
+ {
+  "id": "ena_fetch",
+  "domain": "ngs",
+  "version": "1.0",
+  "summary": "Download sequencing reads from ENA/SRA by run accession",
+  "runtime": "python",
+  "available": true,
+  "reason": "import bioharness.tools.fetch ok",
+  "tags": [
+   "fetch",
+   "reads",
+   "ena",
+   "sra"
+  ],
+  "citation": "Burgin J, et al. The European Nucleotide Archive in 2022. Nucleic Acids Res. 2023.",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "reads",
+    "type": "fastq",
+    "optional": false,
+    "multiple": true
+   }
+  ],
+  "resources": {
+   "cpu": 1,
+   "mem_gb": 2.0,
+   "gpu": 0,
+   "walltime_min": 120
+  }
+ },
+ {
+  "id": "fastp",
+  "domain": "ngs",
+  "version": "0.23.4",
+  "summary": "Adapter trimming and quality filtering of reads",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "trim",
+   "qc"
+  ],
+  "citation": "Chen S, et al. fastp: an ultra-fast all-in-one FASTQ preprocessor. Bioinformatics. 2018.",
+  "inputs": [
+   {
+    "name": "reads",
+    "type": "fastq",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "trimmed",
+    "type": "fastq",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "metrics",
+    "type": "table",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 4,
+   "mem_gb": 4.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "fastqc",
+  "domain": "ngs",
+  "version": "0.12.1",
+  "summary": "Quality control report for raw sequencing reads",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "qc",
+   "reads",
+   "illumina"
+  ],
+  "citation": "Andrews S. FastQC: a quality control tool for high throughput sequence data. 2010.",
+  "inputs": [
+   {
+    "name": "reads",
+    "type": "fastq",
+    "optional": false,
+    "multiple": true
+   }
+  ],
+  "outputs": [
+   {
+    "name": "report",
+    "type": "html",
+    "optional": false,
+    "multiple": true
+   },
+   {
+    "name": "zip",
+    "type": "archive",
+    "optional": true,
+    "multiple": true
+   }
+  ],
+  "resources": {
+   "cpu": 4,
+   "mem_gb": 4.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "samtools_flagstat",
+  "domain": "ngs",
+  "version": "1.19",
+  "summary": "Alignment summary metrics from a BAM",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "qc",
+   "align"
+  ],
+  "citation": "Danecek P, et al. Twelve years of SAMtools and BCFtools. GigaScience. 2021.",
+  "inputs": [
+   {
+    "name": "bam",
+    "type": "bam",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "metrics",
+    "type": "table",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 2,
+   "mem_gb": 4.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "snpeff",
+  "domain": "ngs",
+  "version": "5.2",
+  "summary": "Functional annotation of called variants",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "annotation",
+   "variants"
+  ],
+  "citation": "Cingolani P, et al. A program for annotating and predicting the effects of SNPs. Fly. 2012.",
+  "inputs": [
+   {
+    "name": "vcf",
+    "type": "vcf",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "annotated",
+    "type": "annotation",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 2,
+   "mem_gb": 8.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "gmx_mdrun",
+  "domain": "structural",
+  "version": "2024.1",
+  "summary": "Run a GPU-accelerated molecular dynamics production simulation",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "md",
+   "simulation",
+   "production"
+  ],
+  "citation": "Abraham MJ, et al. GROMACS: High performance molecular simulation. SoftwareX. 2015.",
+  "inputs": [
+   {
+    "name": "coordinates",
+    "type": "coordinates",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "topology",
+    "type": "topology",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "trajectory",
+    "type": "trajectory",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "energy",
+    "type": "energy",
+    "optional": true,
+    "multiple": false
+   },
+   {
+    "name": "log",
+    "type": "table",
+    "optional": true,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 8,
+   "mem_gb": 16.0,
+   "gpu": 1,
+   "walltime_min": 1440
+  }
+ },
+ {
+  "id": "gmx_prepare",
+  "domain": "structural",
+  "version": "2024.1",
+  "summary": "Build topology, solvate and ionise a system for MD",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "md",
+   "topology",
+   "solvation"
+  ],
+  "citation": "Abraham MJ, et al. GROMACS: High performance molecular simulation. SoftwareX. 2015.",
+  "inputs": [
+   {
+    "name": "structure",
+    "type": "pdb",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "topology",
+    "type": "topology",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "coordinates",
+    "type": "coordinates",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 4,
+   "mem_gb": 8.0,
+   "gpu": 0,
+   "walltime_min": 120
+  }
+ },
+ {
+  "id": "mdanalysis_rmsd",
+  "domain": "structural",
+  "version": "2.7",
+  "summary": "Compute backbone RMSD and radius of gyration over a trajectory",
+  "runtime": "python",
+  "available": false,
+  "reason": "import MDAnalysis failed: No module named 'MDAnalysis'",
+  "tags": [
+   "analysis",
+   "md",
+   "rmsd"
+  ],
+  "citation": "Michaud-Agrawal N, et al. MDAnalysis. J Comput Chem. 2011.",
+  "inputs": [
+   {
+    "name": "trajectory",
+    "type": "trajectory",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "topology",
+    "type": "topology",
+    "optional": true,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "metrics",
+    "type": "table",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 2,
+   "mem_gb": 8.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "pdb_fetch",
+  "domain": "structural",
+  "version": "1.0",
+  "summary": "Download a structure from the RCSB PDB by accession",
+  "runtime": "binary",
+  "available": true,
+  "reason": "curl on PATH",
+  "tags": [
+   "fetch",
+   "structure",
+   "rcsb"
+  ],
+  "citation": "",
+  "inputs": [],
+  "outputs": [
+   {
+    "name": "structure",
+    "type": "pdb",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 1,
+   "mem_gb": 1.0,
+   "gpu": 0,
+   "walltime_min": 10
+  }
+ },
+ {
+  "id": "pdbfixer",
+  "domain": "structural",
+  "version": "1.9",
+  "summary": "Repair missing atoms/residues and protonate a structure",
+  "runtime": "conda",
+  "available": false,
+  "reason": "env 'bioharness-md' not found",
+  "tags": [
+   "prep",
+   "protonation"
+  ],
+  "citation": "Eastman P, et al. OpenMM 7. PLoS Comput Biol. 2017.",
+  "inputs": [
+   {
+    "name": "structure",
+    "type": "pdb",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "fixed",
+    "type": "pdb",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 1,
+   "mem_gb": 4.0,
+   "gpu": 0,
+   "walltime_min": 60
+  }
+ },
+ {
+  "id": "vina_dock",
+  "domain": "structural",
+  "version": "1.2.5",
+  "summary": "Dock a ligand into a receptor binding site",
+  "runtime": "docker",
+  "available": true,
+  "reason": "docker available (image pulled on demand)",
+  "tags": [
+   "docking",
+   "ligand",
+   "screening"
+  ],
+  "citation": "Eberhardt J, et al. AutoDock Vina 1.2.0. J Chem Inf Model. 2021.",
+  "inputs": [
+   {
+    "name": "receptor",
+    "type": "pdb",
+    "optional": false,
+    "multiple": false
+   },
+   {
+    "name": "ligand",
+    "type": "pdb",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "outputs": [
+   {
+    "name": "poses",
+    "type": "pose",
+    "optional": false,
+    "multiple": false
+   }
+  ],
+  "resources": {
+   "cpu": 4,
+   "mem_gb": 4.0,
+   "gpu": 0,
+   "walltime_min": 180
+  }
+ }
+]

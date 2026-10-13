@@ -92,3 +92,15 @@ def test_one_broken_agent_does_not_stop_the_room(tmp_path: Path, monkeypatch):
     fresh = Hive(hive_root)
     assert run_until(hive_root, [], lambda: fresh.mailbox("iris").pending() == 0), \
         "the curator never ran, so a failing validator took the room down"
+
+
+def test_a_mission_runs_with_the_hired_roster(tmp_path: Path, capsys):
+    from bioharness.cli import main
+    hive = Hive(tmp_path / "hive")
+    hive.enroll("hugo", "pi", provider="builtin")
+    hive.enroll("ada", "planner", provider="builtin")
+    code = main(["--hive", str(tmp_path / "hive"), "--runs", str(tmp_path / "runs"),
+                 "mission", "call variants", "--from-type", "fastq",
+                 "--to-type", "vcf", "-d", "ngs", "--dry-run", "--max-rounds", "4"])
+    assert code == 0
+    assert "staffed from the hive: ada, hugo" in capsys.readouterr().out

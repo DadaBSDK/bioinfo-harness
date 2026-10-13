@@ -27,7 +27,7 @@ def test_atlas_files_exist():
 
 
 def test_atlas_frames_are_well_formed(atlas):
-    assert atlas["image"] == "/assets/atlas.png"
+    assert atlas["image"] == "assets/atlas.png"
     assert len(atlas["frames"]) >= 20
     for name, f in atlas["frames"].items():
         assert {"x", "y", "w", "h"} <= set(f), name

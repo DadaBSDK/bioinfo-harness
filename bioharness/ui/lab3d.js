@@ -11,7 +11,7 @@ let assets;
 let assetRequest;
 async function loadAssets() {
   if (assets) return assets;
-  if (!assetRequest) assetRequest = fetch('/assets/voxel/models.json', {signal: AbortSignal.timeout(15000)})
+  if (!assetRequest) assetRequest = fetch('assets/voxel/models.json', {signal: AbortSignal.timeout(15000)})
     .then(r => { if (!r.ok) throw new Error('Voxel assets could not be loaded'); return r.json(); })
     .then(data => (assets = data)).finally(() => { assetRequest = null; });
   return assetRequest;
@@ -101,7 +101,7 @@ class LabScene {
     if (this.materials.has(key)) return this.materials.get(key);
     let mat;
     if (assets.materials[key]) {
-      const texture = new THREE.TextureLoader().load(`/assets/voxel/${key}.png`, undefined, undefined, () => {
+      const texture = new THREE.TextureLoader().load(`assets/voxel/${key}.png`, undefined, undefined, () => {
         if (this.disposed) return;
         mat.map = null; mat.color.set(assets.materials[key]); mat.needsUpdate = true;
         this.bridge.notice?.('Some textures could not load. Solid voxel materials are being used.');

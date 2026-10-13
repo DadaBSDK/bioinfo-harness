@@ -248,7 +248,7 @@ def main() -> None:
     atlas, frames = pack(all_sprites)
     atlas.save(OUT / "atlas.png")
     (OUT / "atlas.json").write_text(json.dumps({
-        "image": "/assets/atlas.png",
+        "image": "assets/atlas.png",
         "frames": frames,
         # Categories the renderer reads. "tiles" are the 32x32 repeating
         # surfaces; the wall run/door pieces are a different size and shape and

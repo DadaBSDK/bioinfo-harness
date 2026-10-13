@@ -1,0 +1,70 @@
+{
+ "runs": {
+  "total": 2,
+  "ok": 1,
+  "failed": 1,
+  "running": 0
+ },
+ "capabilities": {
+  "total": 16,
+  "available": 14,
+  "domains": [
+   "general",
+   "ngs",
+   "structural"
+  ]
+ },
+ "agents": 8,
+ "cost": {
+  "by_agent": {
+   "ada": {
+    "tokens_in": 16173,
+    "tokens_out": 799,
+    "usd": 0.0,
+    "calls": 11
+   },
+   "hugo": {
+    "tokens_in": 11600,
+    "tokens_out": 251,
+    "usd": 0.0,
+    "calls": 8
+   },
+   "iris": {
+    "tokens_in": 5463,
+    "tokens_out": 275,
+    "usd": 0.0,
+    "calls": 4
+   },
+   "nova": {
+    "tokens_in": 8872,
+    "tokens_out": 225,
+    "usd": 0.0,
+    "calls": 7
+   },
+   "quill": {
+    "tokens_in": 1313,
+    "tokens_out": 154,
+    "usd": 0.0,
+    "calls": 1
+   },
+   "rex": {
+    "tokens_in": 7820,
+    "tokens_out": 206,
+    "usd": 0.0,
+    "calls": 6
+   },
+   "vera": {
+    "tokens_in": 1309,
+    "tokens_out": 138,
+    "usd": 0.0,
+    "calls": 1
+   }
+  },
+  "total_usd": 0.0,
+  "total_tokens": 54598
+ },
+ "paths": {
+  "runs": "~/lab/runs",
+  "hive": "~/lab/hive"
+ }
+}

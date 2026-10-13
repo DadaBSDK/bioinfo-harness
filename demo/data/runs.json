@@ -1,0 +1,29 @@
+[
+ {
+  "run_id": "run-c432d8184176",
+  "workflow": "wgs-variants",
+  "created": 1791921020.484854,
+  "created_iso": "2026-10-14T01:20:20+0530",
+  "dry_run": true,
+  "status": "ok",
+  "seconds": 0.0,
+  "steps": 7,
+  "by_status": {
+   "skipped": 7
+  }
+ },
+ {
+  "run_id": "run-4b825237d356",
+  "workflow": "Variant Calling Workflow",
+  "created": 1791921067.662562,
+  "created_iso": "2026-10-14T01:21:07+0530",
+  "dry_run": true,
+  "status": "failed",
+  "seconds": 0.0,
+  "steps": 6,
+  "by_status": {
+   "skipped": 1,
+   "failed": 1
+  }
+ }
+]

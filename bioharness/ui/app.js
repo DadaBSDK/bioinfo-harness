@@ -71,7 +71,7 @@ const ATLAS = { img: null, frames: null, ready: false };
 
 async function loadAtlas() {
   try {
-    const idx = await api('/assets/atlas.json');
+    const idx = await api('assets/atlas.json');
     const img = new Image();
     img.src = idx.image;
     await img.decode();
@@ -788,7 +788,7 @@ function paintLabName() {
 async function renameLab(input) {
   const name = input.value.trim().replace(/\s+/g, ' ');
   if (!name || name === labName()) { input.value = labName(); return; }
-  const r = await api('/api/lab', {
+  const r = await api('api/lab', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   }).catch(error => ({ ok: false, error: error.message }));
@@ -1012,9 +1012,9 @@ function ccBriefs() {
   return rows.map(b => `<div class="card"><div class="card-body">
       <div class="kv"><span class="k">${clock(b.ts)}</span> → ${esc(b.to)}</div>
       <div style="margin:4px 0">${esc(b.order.slice(0, 160))}</div>
-      ${b.pdf ? `<a href="/api/brief/${esc(b.thread)}" target="_blank"
+      ${b.pdf ? `<a href="api/brief/${esc(b.thread)}" target="_blank"
                     rel="noopener">verdict brief (PDF, ${Math.round(b.bytes / 1024)}kB)</a>`
-              : `<a href="/api/brief/${esc(b.thread)}" target="_blank"
+              : `<a href="api/brief/${esc(b.thread)}" target="_blank"
                     rel="noopener">render the brief</a>`}
     </div></div>`).join('');
 }
@@ -1264,7 +1264,7 @@ function chatTurn(c) {
     ? `<span class="vpill ${VERDICT_CLASS[verdict] || ''}">${esc(verdict)}</span>`
     : '';
   const brief = c.topic === 'brief' && c.body?.thread
-    ? `<div class="briefline"><a href="/api/brief/${esc(c.body.thread)}"
+    ? `<div class="briefline"><a href="api/brief/${esc(c.body.thread)}"
          target="_blank" rel="noopener">Open the verdict brief (PDF)</a>
          <span class="mono">${esc(String(c.body.verdicts || 0))} verdict(s)</span></div>`
     : '';
@@ -1465,23 +1465,23 @@ async function refresh(full = false) {
   state.refreshing = true;
   try {
     const [runs, overview, floor] = await Promise.all(
-      [api('/api/runs'), api('/api/overview'), api('/api/floor')]);
+      [api('api/runs'), api('api/overview'), api('api/floor')]);
     state.runs = runs; state.overview = overview; state.floor = floor;
     state.connected = true; render();
     if (!runs.some(r => r.run_id === state.runId)) state.runId = runs[0]?.run_id || null;
     const runId = state.runId;
-    const detail = runId ? await api(`/api/runs/${encodeURIComponent(runId)}`).catch(() => null) : null;
+    const detail = runId ? await api(`api/runs/${encodeURIComponent(runId)}`).catch(() => null) : null;
     if (state.runId === runId) state.detail = detail;
     if (state.tab === 'chat') {
-      state.chat = await api('/api/conversation?limit=200').catch(() => state.chat);
+      state.chat = await api('api/conversation?limit=200').catch(() => state.chat);
     }
     if (state.tab === 'chat' || state.cc === 'briefs' || full) {
-      state.briefs = await api('/api/briefs').catch(() => state.briefs);
+      state.briefs = await api('api/briefs').catch(() => state.briefs);
     }
-    if (state.tab === 'hive' || full || !state.hive) state.hive = await api('/api/hive').catch(() => state.hive);
-    if ((state.tab === 'caps' && !state.caps) || full) state.caps = await api('/api/caps').catch(() => state.caps);
+    if (state.tab === 'hive' || full || !state.hive) state.hive = await api('api/hive').catch(() => state.hive);
+    if ((state.tab === 'caps' && !state.caps) || full) state.caps = await api('api/caps').catch(() => state.caps);
     if (!state.staffOptions || full || (state.cc === 'staff' && Date.now() - (state.staffOptionsAt || 0) > 30000)) {
-      state.staffOptions = await api('/api/staff/options').catch(() => null);
+      state.staffOptions = await api('api/staff/options').catch(() => null);
       if (state.staffOptions) state.staffOptionsAt = Date.now();
       state.hireForm.role ||= state.staffOptions?.roles[0] || '';
       state.hireForm.model ||= state.staffOptions?.providers.find(p => p.id === state.hireForm.provider)?.models[0] || '';
@@ -1504,7 +1504,7 @@ async function loadLog(step) {
   const pending = { step, text: 'Loading log…' };
   state.log = pending;
   render();
-  const r = await api(`/api/runs/${encodeURIComponent(runId)}/log?step=${
+  const r = await api(`api/runs/${encodeURIComponent(runId)}/log?step=${
     encodeURIComponent(step)}&stream=${stream}`).catch(error => ({ exists: true, text: error.message }));
   if (state.log !== pending || state.runId !== runId || state.logTab !== stream) return;
   state.log = { step, text: r.exists ? r.text : `(no ${state.logTab}.log for ${step})` };
@@ -1528,7 +1528,7 @@ async function hireAgent() {
   const body = { ...state.hireForm, name: state.hireForm.name.trim() };
   if (!body.name) { state.hireMsg = 'give them a name first'; return render(); }
   state.hiring = true; render();
-  const r = await api('/api/staff/hire', {
+  const r = await api('api/staff/hire', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   }).catch(error => ({ ok: false, error: error.message }));
@@ -1541,7 +1541,7 @@ async function hireAgent() {
 }
 
 async function fireAgent(name) {
-  const r = await api('/api/staff/fire', {
+  const r = await api('api/staff/fire', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   }).catch(error => ({ ok: false, error: error.message }));
@@ -1568,7 +1568,7 @@ async function sendMessage() {
     : topic === 'peer.ask' ? { question: text, hops: 0 }
     : ['smalltalk', 'greet'].includes(topic) ? { line: text, hops: 0 }
     : { note: text };
-  const r = await api('/api/message', {
+  const r = await api('api/message', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ to, topic, body }),
   }).catch(error => ({ ok: false, error: error.message }));
@@ -1654,7 +1654,7 @@ document.addEventListener('input', async e => {
   const out = $('#recall-out');
   if (!out) return;
   if (!q) { state.recallHtml = ''; out.innerHTML = ''; return; }
-  const hits = await api('/api/recall?q=' + encodeURIComponent(q)).catch(() => null);
+  const hits = await api('api/recall?q=' + encodeURIComponent(q)).catch(() => null);
   if ($('#recall')?.value.trim() !== q || !out.isConnected) return;
   if (!hits) { state.recallHtml = 'Could not search memory. Please try again.'; out.textContent = state.recallHtml; return; }
   state.recallHtml = hits.length ? hits.map(h => `<div class="msg">
