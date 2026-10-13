@@ -54,7 +54,7 @@ def test_no_key_is_reported_clearly():
     assert not p.available()
     reason = p.unavailable_reason()
     assert "GEMINI_API_KEY" in reason
-    # The distinction that actually trips people up.
+    # The reason also explains that AV_API_KEY is not a Gemini key.
     assert "AV_API_KEY" in reason
 
 
@@ -176,7 +176,7 @@ def test_configuration_errors_are_not_retryable(monkeypatch, code):
 
 
 def test_a_transient_failure_is_retried_and_can_succeed(monkeypatch):
-    """A 503 blip should not cost the mission its plan."""
+    """A transient 503 is retried."""
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
     monkeypatch.setattr(f"{MOD}.time.sleep", lambda *_: None)
@@ -224,8 +224,7 @@ def test_a_permanent_failure_is_not_retried(monkeypatch):
 
 
 def test_thinking_tokens_are_counted_as_output(monkeypatch):
-    """Gemini bills thinking separately and it dominates; omitting it would
-    under-report usage by an order of magnitude."""
+    """Thinking tokens are counted as output."""
     monkeypatch.setenv("GEMINI_API_KEY", "k")
     monkeypatch.setattr(f"{MOD}.available_models", lambda *a, **k: ["m"])
     monkeypatch.setattr(f"{MOD}._request", lambda *a, **k: {

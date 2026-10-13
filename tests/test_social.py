@@ -1,8 +1,4 @@
-"""Personalities, greetings and talk that is not about the work.
-
-The point of these is that a lab is people: a new hire gets welcomed, a quiet
-room produces gossip, and none of it may run away with the budget.
-"""
+"""Personas, greetings and small talk, and the limits that keep them bounded."""
 from __future__ import annotations
 
 import json
@@ -35,13 +31,13 @@ def ctx(tmp_path: Path) -> AgentContext:
 
 # -- who they are ----------------------------------------------------------
 def test_a_persona_is_stable_for_a_name():
-    """`ada` must be the same person tomorrow, and on the cluster node."""
+    """The same name always produces the same persona."""
     assert persona.make("ada") == persona.make("ada")
     assert persona.make("ada") != persona.make("iris")
 
 
 def test_personas_spread_across_the_tables():
-    """Taking single bytes off one digest put four of six on the same hobby."""
+    """Persona fields are drawn independently, so agents do not cluster."""
     from collections import Counter
     names = [f"agent{i}" for i in range(400)]
     for field in ("temperament", "interest", "peeve"):
@@ -51,7 +47,7 @@ def test_personas_spread_across_the_tables():
 
 
 def test_a_persona_is_written_down_not_recomputed(ctx: AgentContext):
-    """Otherwise an agent's personality drifts when the source tables change."""
+    """A persona is stored on first use, so table changes do not alter it."""
     ctx.hive.enroll("iris", "curator")
     first = ctx.hive.ensure_persona("iris", persona.make)
     identity = json.loads((ctx.hive.mailbox("iris").dir / "identity.json").read_text())
@@ -92,7 +88,7 @@ def test_a_greeting_is_answered_once(ctx: AgentContext):
     ctx.hive.route()
     back = ctx.hive.mailbox("iris").peek()
     assert [m.topic for m in back] == ["greet.reply"]
-    # And the reply to a reply is silence, not a third hello.
+    # A reply to a reply gets no answer.
     iris = Curator("iris", ctx, provider=StubProvider())
     iris.tick()
     ctx.hive.route()
@@ -107,7 +103,7 @@ def test_nobody_greets_themselves(ctx: AgentContext):
 
 # -- talk about nothing ----------------------------------------------------
 def test_small_talk_peters_out(ctx: AgentContext):
-    """Two colleagues who cannot stop talking are a budget problem."""
+    """Small talk stops after the hop limit."""
     ctx.hive.enroll("iris", "curator")
     ctx.hive.enroll("quill", "scribe")
     iris = Curator("iris", ctx, provider=StubProvider("kettle's broken again"))
@@ -187,15 +183,14 @@ def test_a_newcomer_is_welcomed_by_the_running_lab(tmp_path: Path):
     assert welcomes, "nobody went over to say hello"
     assert welcomes[0]["payload"]["newcomer"] == "newbie"
     assert sorted(welcomes[0]["payload"]["by"]) == ["iris", "quill"]
-    # And the newcomer answered them.
+    # The newcomer replied.
     assert any(e["payload"].get("from") == "newbie"
                for e in hive.events("message.routed"))
 
 
 # -- the invented lab stays invented ---------------------------------------
 def test_gossip_never_comes_back_as_evidence(ctx: AgentContext):
-    """The failure this guards against: an agent explaining a QC failure with a
-    freezer incident that happened only in small talk."""
+    """Social notes are excluded from work recall."""
     ctx.hive.enroll("iris", "curator")
     ctx.hive.enroll("nova", "analyst")
     nova = Analyst("nova", ctx, provider=StubProvider())
@@ -207,7 +202,7 @@ def test_gossip_never_comes_back_as_evidence(ctx: AgentContext):
     assert any("duplication" in r["text"] for r in work)
     assert not any("-80" in r["text"] for r in work), \
         "small talk surfaced as context for the work"
-    # It is still the agent's memory -- just not evidence.
+    # Still stored as memory, but excluded from work recall.
     social = nova.recall("freezer", kinds=("social",))
     assert any("-80" in r["text"] for r in social)
 
@@ -252,7 +247,7 @@ def test_a_work_prompt_carries_the_guard_but_small_talk_does_not(ctx: AgentConte
 
 
 def test_an_agent_is_primed_with_its_own_memory_only(ctx: AgentContext):
-    """Agents were answering in each other's voices about work they never did."""
+    """Work prompts recall only the agent's own memory."""
     ctx.hive.enroll("nova", "analyst")
     ctx.hive.enroll("quill", "scribe")
     ctx.hive.append_memory("quill", "I drafted Methods for run r-9 using fastp.")

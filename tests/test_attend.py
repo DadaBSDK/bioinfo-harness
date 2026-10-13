@@ -1,8 +1,5 @@
-"""The attendant loop: what makes a message sent from the dashboard happen.
-
-Posting from the browser only drops mail into a mailbox. Without something
-turning the crank, that message sits there and every agent reads `awaiting` --
-which is the bug these tests exist to keep fixed.
+"""The attendant loop, which routes mail and ticks the roster so messages sent
+from the dashboard are acted on.
 """
 from __future__ import annotations
 

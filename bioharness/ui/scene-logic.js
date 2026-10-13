@@ -11,7 +11,7 @@ export function messagePose(start, end, elapsed) {
     opacity:t<1 ? 1 : Math.max(0,1-burst), done:burst>=1};
 }
 
-// A refresh can repeat the same events. Never replay history or leak the cache.
+// New events from the last 15 s, deduplicated across refreshes; the seen-set is capped at 1000.
 export function freshTraffic(traffic, seen, now) {
   const fresh=[];
   for(const event of traffic || []) {

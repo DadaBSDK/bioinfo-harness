@@ -53,7 +53,7 @@ def test_missing_model_names_what_is_installed(monkeypatch):
 
 
 def test_local_inference_is_free(monkeypatch):
-    """Cost is measured in tokens, never dollars, for a model on your own box."""
+    """Local inference records tokens with zero cost."""
     monkeypatch.setattr("bioharness.agents.local_provider.installed_models",
                         lambda *a, **k: ["m"])
     monkeypatch.setattr("bioharness.agents.local_provider._post",

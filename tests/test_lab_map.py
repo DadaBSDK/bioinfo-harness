@@ -32,8 +32,7 @@ def test_every_role_has_a_room():
 
 
 def test_the_map_matches_the_floor_the_operator_sees():
-    """If a room moves it moves in both, or the lab an agent talks about stops
-    being the lab you can watch."""
+    """Room ids in lab.py must match the rooms drawn in app.js."""
     drawn = UI.read_text()
     for room in lab.ROOMS:
         assert f"id: '{room['id']}'" in drawn, f"{room['id']} is not on the floor"
@@ -47,8 +46,9 @@ def test_a_persona_haunts_its_own_room():
 
 
 def test_speech_reads_as_second_person():
-    """These follow "You ..." in the prompt; a third-person entry produced
-    "You over-explains"."""
+    """Speech traits follow "You ..." in the prompt, so they must be second
+    person.
+    """
     for line in persona.SPEECH:
         assert not line.split()[0].endswith("s") or line.startswith("swear"), line
 

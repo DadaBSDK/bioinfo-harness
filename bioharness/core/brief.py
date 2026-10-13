@@ -1,13 +1,8 @@
 """The verdict brief: what the lab said about an order, as a PDF.
 
-Every order the operator gives ends up as one document -- the order itself, then
-each agent's verdict in its own words, then what was actually run and what it
-cost. It exists because a conversation scrolling past in a browser is not a
-record you can take to anyone, and because "what did the lab think of this?"
-should have exactly one answer per order.
-
-The whole thing is reconstructed from the hive on disk: no state is kept for it,
-so a brief can be rendered again months later from a run directory alone.
+One document per order: the order, each agent's verdict, what was run, and
+what it cost. Reconstructed entirely from the hive and run directories, so it
+can be re-rendered at any time.
 """
 from __future__ import annotations
 
@@ -25,17 +20,11 @@ VERDICT_ORDER = {"cannot do": 0, "will do with caveats": 1, "will do": 2}
 
 
 def line_of(m: dict[str, Any]) -> str:
-    """One line of plain English for a message.
-
-    Falls back to compact JSON rather than to nothing: an unrecognised topic
-    should still show what was actually said.
-    """
+    """One line of plain English for a message, falling back to compact JSON."""
     topic = m.get("topic", "")
     body = m.get("body", {}) or {}
-    # An answer carries the question it answers, so `answer` is checked first --
-    # otherwise every reply reads as an echo of what was asked. `instruction` is
-    # what a dispatched agent was told to do; without it a tasking message
-    # renders as the whole JSON body of its work item.
+    # Field priority: `answer` before the question it echoes, and `instruction`
+    # for dispatched work items.
     for key in ("position", "line", "answer", "question", "instruction", "goal",
                 "order", "summary", "reason", "error"):
         if body.get(key):
@@ -66,7 +55,7 @@ def orders(hive: Hive, limit: int = 25) -> list[dict[str, Any]]:
         if m.get("sender") != "human" or not m.get("thread"):
             continue
         if m["thread"] != m.get("id"):
-            continue                      # a follow-up inside someone's thread
+            continue                      # follow-up inside another thread
         out.append({"thread": m["thread"], "ts": float(m.get("ts", 0.0)),
                     "to": m.get("recipient", ""), "topic": m.get("topic", ""),
                     "order": line_of(m)})
@@ -98,8 +87,7 @@ def gather(hive: Hive, thread: str) -> dict[str, Any]:
             "ts": float(m.get("ts", 0.0)),
         }
 
-    # Anyone who spoke in the thread but never returned a verdict still belongs
-    # in the brief -- silence from an agent is a finding, not an omission.
+    # Include agents who spoke in the thread without returning a verdict.
     said: dict[str, str] = {}
     for m in msgs:
         if m["sender"] in ("human",) or m.get("topic") == "verdict":
@@ -110,9 +98,7 @@ def gather(hive: Hive, thread: str) -> dict[str, Any]:
     runs = [e["payload"] for e in hive.events("workflow.finished")
             if started <= e["ts"] <= ended + 5]
 
-    # Artifacts are recorded in each run's own ledger rather than in the hive,
-    # so they are read back from the run directory. A brief that says "0
-    # artifacts" while three files sit on disk is worse than no brief.
+    # Artifacts live in each run's ledger, so read them from the run directory.
     artifacts: list[dict[str, Any]] = []
     for run in runs:
         ledger = Path(str(run.get("dir", ""))) / "ledger.jsonl"
@@ -137,11 +123,10 @@ def gather(hive: Hive, thread: str) -> dict[str, Any]:
         acc["usd"] += c.get("usd", 0.0)
 
     ran_ok = [r for r in runs if r.get("status") == "ok"]
-    # What the operator has to supply, gathered from wherever it was said: the
-    # PI's held plan, the runner's refusal, and every verdict's `needs`.
+    # Inputs the operator must supply: from the PI's held plan, the runner's
+    # refusal, and each verdict's `needs`.
     asked: list[str] = []
-    # The precise ones first -- a `needs` message names parameters the operator
-    # can literally type back, while a verdict describes them in a sentence.
+    # `needs` messages first: they name exact parameters.
     for topics in (("needs",), ("verdict",), None):
         for m in msgs:
             topic = m.get("topic", "")

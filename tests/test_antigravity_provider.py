@@ -156,13 +156,13 @@ def test_factory_builds_the_dedicated_provider():
 
 
 def test_the_generic_cli_wrapper_does_not_shadow_it():
-    """A generic entry would win in make_provider and lose the usage figures."""
+    """make_provider must pick the dedicated provider, which reports token usage."""
     assert "antigravity" not in PROVIDERS
 
 
 # -- caching ---------------------------------------------------------------
 def test_the_model_listing_is_cached(monkeypatch, installed):
-    """Listing spawns the CLI and takes seconds; the dashboard polls often."""
+    """Model listing spawns the CLI, so results are cached."""
     calls = {"n": 0}
 
     def counted(*a, **k):
@@ -187,7 +187,7 @@ def test_refresh_bypasses_the_cache(monkeypatch, installed):
 
 
 def test_a_failed_listing_is_cached_too(monkeypatch, installed):
-    """Otherwise every dashboard poll re-pays a multi-second failure."""
+    """A failed listing is cached, so polls do not retry a slow failure."""
     calls = {"n": 0}
 
     def failing(*a, **k):
@@ -225,8 +225,9 @@ def test_the_schema_reaches_the_command_line(monkeypatch, installed):
 
 
 def test_an_empty_schema_reply_is_retried_without_the_schema(monkeypatch, installed):
-    """flash-medium/high sometimes finish a schema-constrained turn agentically
-    and emit nothing. Losing the turn to that is worse than asking again."""
+    """An empty reply to a schema-constrained prompt is retried without the
+    schema.
+    """
     calls = []
 
     def flaky(cmd, **k):

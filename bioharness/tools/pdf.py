@@ -1,13 +1,7 @@
-"""A very small PDF writer, in the standard library.
+"""A minimal PDF writer using only the standard library.
 
-A bioinformatics box should not need a document toolchain to produce a report,
-and the harness already refuses to need a JS one for its dashboard. This writes
-PDF 1.4 with the base-14 fonts, which every reader has: no embedding, no
-dependencies, no headless browser.
-
-It does one document shape -- a titled, sectioned text report -- because that is
-what a verdict brief is. Anything that needs figures should render HTML and be
-printed by something that draws.
+Writes PDF 1.4 with the base-14 fonts (no embedding) for one document shape:
+a titled, sectioned text report.
 """
 from __future__ import annotations
 
@@ -18,14 +12,12 @@ from typing import Any
 A4 = (595.28, 841.89)
 MARGIN = 56.0
 
-# Base-14 metrics, near enough for wrapping: the exact AFM widths would be 14
-# tables of 300 numbers to save a few characters a line.
+# Approximate Base-14 widths, good enough for line wrapping.
 CHAR_W = {"F1": 0.50, "F2": 0.54, "F3": 0.50, "F4": 0.60}
 FONTS = {"F1": "Helvetica", "F2": "Helvetica-Bold",
          "F3": "Helvetica-Oblique", "F4": "Courier"}
 
-# The models write typographic punctuation and the readers want WinAnsi, so the
-# few characters that actually turn up are folded rather than dropped.
+# Fold typographic punctuation into WinAnsi equivalents.
 FOLD = {
     "—": "-", "–": "-", "‘": "'", "’": "'",
     "“": '"', "”": '"', "…": "...", "•": "-",

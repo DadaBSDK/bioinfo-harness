@@ -1,8 +1,5 @@
-# Getting data into the building.
-#
-# Without these the type graph starts at `fastq`, a file the operator has
-# already downloaded by hand, and an order like "fetch the data and run it" has
-# no route. A fetch step gives the planner somewhere to start.
+# Data download capabilities. They give the type graph a starting point when
+# the input data is not already on disk.
 capabilities:
   - id: ena_fetch
     domain: ngs

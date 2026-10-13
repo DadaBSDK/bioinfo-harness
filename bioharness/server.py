@@ -1,13 +1,11 @@
 """Local dashboard server.
 
 Binds to loopback by default and never runs a workflow or calls a model. GET
-endpoints read the same files the CLI writes; the few POST endpoints only write
-into the hive -- a message, a hire or dismissal, the lab's name -- and acting on
-them is left to `bioharness attend`. That means the UI can be pointed at a run
-directory on a cluster (via `ssh -L`) with no risk of it disturbing the run.
+endpoints read the files the CLI writes; POST endpoints only write to the hive
+(a message, a hire or dismissal, the lab's name), and `bioharness attend` acts
+on them. Safe to point at a live run directory, e.g. over `ssh -L`.
 
-Stdlib only -- a bioinformatics box should not need a JS toolchain to see
-whether its pipeline is alive.
+Standard library only.
 """
 from __future__ import annotations
 
@@ -91,8 +89,7 @@ class Dashboard:
             "palace": hive.palace.stats(),
         }
 
-    # Status is derived, never stored: an agent is "working" while it holds
-    # mail or has acted recently, "blocked" if its last event said so.
+    # Status is derived from mail and recent events, never stored.
     WORKING_WINDOW_S = 25.0
 
     def floor_state(self) -> dict[str, Any]:
@@ -134,8 +131,7 @@ class Dashboard:
 
         runs = self.run_list()
         current = runs[0] if runs else None
-        # Bubbles are drawn from the last few utterances; the floor only needs
-        # the line, not the whole message body.
+        # Speech bubbles only need the line, not the full message body.
         chatter = [{k: v for k, v in c.items() if k != "body"}
                    for c in self.conversation(limit=40)][-25:]
         return {
@@ -186,8 +182,7 @@ class Dashboard:
         ollama = OllamaProvider()
         gem = GeminiProvider()
         agy = AntigravityProvider()
-        # Model discovery is slow, so serve whatever is cached and refresh
-        # behind the request rather than making the panel wait for a CLI spawn.
+        # Serve cached models and refresh in the background; discovery is slow.
         gem_mod.warm_models()
         agy_mod.warm_models()
         gem_models = gem_mod.peek_models() or []
@@ -269,8 +264,7 @@ class Dashboard:
         if any(a["name"] == name for a in hive.roster()):
             return {"ok": False, "error": f"{name!r} is already on the roster"}
 
-        # A model only means something for the API provider; storing one for a
-        # builtin or CLI agent just makes the roster lie about what it runs.
+        # Models apply only to the API provider; clear them for other providers.
         model = model if provider in ("claude-api", "gemini-api", "ollama",
                                       "antigravity") else ""
         identity = hive.enroll(name, role, provider=provider, model=model,
@@ -302,7 +296,7 @@ class Dashboard:
         missing = [n for n in names if n not in roster]
         changed = []
         for name in targets:
-            # An operator is the human at the door, not a worker; leave it be.
+            # The operator is not a worker; skip it.
             if roster[name].get("role") == "operator":
                 continue
             if hive.retarget(name, provider=provider,
@@ -321,8 +315,8 @@ class Dashboard:
             return {"ok": True, "dismissed": name}
         return {"ok": False, "error": f"no agent named {name!r}"}
 
-    # A human dropping a message into an agent's mailbox. The recipient must
-    # already be enrolled, and the topic must be one the roster handles.
+    # Queue a human message. The recipient must be enrolled and the topic
+    # allowed.
     ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
                       "qc.check", "analyze", "report", "peer.ask",
                       "smalltalk", "greet", "run.request", "directive")
@@ -336,7 +330,7 @@ class Dashboard:
     def send_message(self, to: str, topic: str, body: dict[str, Any]) -> dict[str, Any]:
         hive = self.hive()
         names = {a["name"] for a in hive.roster()}
-        # "*" is the operator addressing the whole lab; the router fans it out.
+        # "*" broadcasts to the whole lab.
         if to != "*" and to not in names:
             return {"ok": False, "error": f"no agent named {to!r}; enrolled: {sorted(names)}"}
         if to == "*" and not (names - {"human"}):
@@ -350,11 +344,10 @@ class Dashboard:
             body = {**body, "order": body.get("line") or body.get("note")
                     or body.get("goal", "")}
         if topic in ("smalltalk", "greet") and "line" not in body:
-            # The composer posts free text; these topics read it as `line`.
+            # The composer posts free text; these topics expect `line`.
             body = {**body, "line": body.get("note") or body.get("goal", ""),
                     "hops": 0}
-        # The operator's message opens a thread of its own, and everything said
-        # in answer stays in it -- that thread is what a brief is built from.
+        # Operator messages start a new thread; replies stay in it for the brief.
         msg = hive.send("human", to, topic, body)
         hive.event("message.queued_by_human", {"to": to, "topic": topic,
                                                "id": msg.id, "thread": msg.thread})
@@ -381,8 +374,7 @@ class Dashboard:
             return None
         pdf = self.brief_dir / f"brief-{thread}.pdf"
         if not pdf.is_file():
-            # No PDF on disk yet: build it on request rather than showing the
-            # operator a dead link.
+            # Render the PDF on demand if it is not on disk yet.
             brief = gather(self.hive(), thread)
             if not brief:
                 return None
@@ -429,8 +421,7 @@ class Dashboard:
                     except json.JSONDecodeError:
                         continue
 
-        # Task state comes from summary.json once finished, and from the live
-        # ledger while the run is still going.
+        # Task state: summary.json when finished, the live ledger while running.
         tasks = {t["step"]: t for t in summary.get("tasks", [])}
         for entry in ledger:
             if not entry["event"].startswith("task."):
@@ -512,7 +503,7 @@ class Handler(BaseHTTPRequestHandler):
         self.dash = dashboard
         super().__init__(*args, **kw)
 
-    # Quiet by default; the CLI prints one line about where to point a browser.
+    # Suppress per-request logging.
     def log_message(self, fmt: str, *args: Any) -> None:
         pass
 
@@ -527,7 +518,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._static(route)
         except BrokenPipeError:
             pass
-        except Exception as exc:  # noqa: BLE001 - a dashboard must not take the run down
+        except Exception as exc:  # noqa: BLE001 - never crash the handler
             self._send_json({"error": str(exc)}, status=500)
 
     def _api(self, route: str, query: dict[str, list[str]]) -> None:
@@ -599,7 +590,7 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             result = self._dispatch_post(route, payload)
-        except Exception as exc:  # keep a failed write from terminating the handler
+        except Exception as exc:  # report write failures as JSON
             return self._send_json({"ok": False, "error": str(exc)}, status=500)
         return self._send_json(result, status=200 if result.get("ok") else 400)
 

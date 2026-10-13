@@ -1,15 +1,8 @@
-"""Who an agent is when it is not working.
+"""Agent personas: temperament, speaking style, interests and pet peeves.
 
-A roster of six job functions is a org chart, not a lab. These are the things
-that make someone a labmate: a temperament, a way of talking, something they
-care about that has nothing to do with the science, and something that reliably
-annoys them.
-
-Personas are derived from the agent's name with a stable hash rather than
-`random`, whose seed is salted per process -- `ada` must be the same person
-tomorrow, and on the cluster node, as she is here. The persona is written into
-`identity.json` the first time it is needed, so it survives a change to these
-tables: an agent's personality should not drift because the source did.
+Personas are derived from the agent's name with a stable hash, so the same
+name always gets the same persona. The result is stored in `identity.json` on
+first use, so later edits to these tables do not change existing agents.
 """
 from __future__ import annotations
 
@@ -24,8 +17,7 @@ TEMPERAMENTS = [
     "sardonic", "earnest and slightly intense", "unflappable", "conspiratorial",
     "world-weary but kind",
 ]
-# Second person: these follow "You ..." in the prompt, and a third-person entry
-# there produced "You over-explains".
+# Second person: each entry follows "You ..." in the prompt.
 SPEECH = [
     "keep your sentences short and skip the filler",
     "go off on tangents that eventually land somewhere useful",
@@ -45,7 +37,7 @@ INTERESTS = [
     "vinyl records nobody else likes", "long-distance running", "amateur radio",
     "a cat with a medical condition", "learning Portuguese, badly",
 ]
-# Every peeve points at something the lab actually has -- see `lab.ROOMS`.
+# Each peeve refers to something in `lab.ROOMS`.
 PEEVES = [
     "people who leave the -80 door ajar", "undocumented shell scripts",
     "meetings that could have been a message", "the printer jamming on every figure",
@@ -53,18 +45,14 @@ PEEVES = [
     "the coffee rota being ignored", "reviewers who ask for one more experiment",
     "spreadsheets used as databases", "the UPS beeping through every storm",
 ]
-# Where someone is usually found comes from the real floor plan rather than a
-# list of its own: an agent that haunts "the cold room" when the building has no
-# cold room is exactly the drift this is meant to stop.
+# Haunts come from `lab.landmarks`, so agents only mention real places.
 
 
 def _picks(name: str, salt: str = "") -> list[int]:
     """A stable stream of large numbers for `name`.
 
-    sha256, not `hash()`: the built-in is salted per process, so a persona would
-    change on every restart. Each field draws from its own 4-byte slice under
-    its own salt -- taking single bytes off one digest put four of six agents on
-    the same hobby, because a small table and a small number collide often.
+    Uses sha256 because `hash()` is salted per process. Each field draws from its
+    own 4-byte slice under its own salt to avoid collisions across fields.
     """
     digest = hashlib.sha256(f"{salt}:{name}".encode()).digest()
     return [int.from_bytes(digest[i:i + 4], "big") for i in range(0, 32, 4)]
@@ -80,10 +68,10 @@ def make(name: str, role: str = "") -> dict[str, Any]:
         "speech": _pick(name, "speech", SPEECH),
         "interest": _pick(name, "interest", INTERESTS),
         "peeve": _pick(name, "peeve", PEEVES),
-        # Something in the agent's own room, so "you'll find me by X" is true.
+        # A landmark in the agent's own room.
         "haunt": _pick(name, "haunt", lab.landmarks(role)),
         "room": lab.room_for(role)["label"],
-        # How readily this one starts a conversation nobody asked for.
+        # Likelihood of starting small talk unprompted.
         "chattiness": round(0.25 + (_picks(name, "chat")[0] % 60) / 100, 2),
     }
 
@@ -128,8 +116,7 @@ def prompt(name: str, p: dict[str, Any]) -> str:
 
 
 # -- lines for an agent with no LLM behind it ------------------------------
-# A deterministic agent should still have a personality; going quiet at the
-# coffee machine is worse than being a bit repetitive.
+# Canned lines so deterministic agents still have a voice.
 def canned_greeting(name: str, p: dict[str, Any], newcomer: str, role: str) -> str:
     n = _picks(name + newcomer, "greet")
     openers = [

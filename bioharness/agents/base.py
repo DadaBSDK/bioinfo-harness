@@ -1,9 +1,8 @@
 """Agent base class and CLI provider wrapping.
 
-The harness does not reimplement agents -- it wraps the
-CLI you already pay for (claude, codex, gemini, ...) as a subprocess with its
-own working directory and identity. An agent may equally be backed by a plain
-Python function; the orchestrator cannot tell the difference and should not.
+Agents wrap an existing agent CLI (claude, codex, gemini, ...) as a subprocess
+with its own working directory and identity, or a plain Python function. The
+orchestrator treats both the same.
 """
 from __future__ import annotations
 
@@ -24,12 +23,11 @@ from ..core.schemas import Message
 from . import lab
 from . import persona as persona_mod
 
-# Provider CLIs, mapped to the argv shape that takes a prompt and prints a reply.
+# Provider name -> argv prefix that takes a prompt and prints a reply.
 PROVIDERS: dict[str, list[str]] = {
     "claude":   ["claude", "-p"],
     "codex":    ["codex", "exec"],
-    # `agy` (the Antigravity CLI) is not listed here: it has its own provider
-    # in antigravity_provider, because it reports real token usage.
+    # `agy` has its own provider (antigravity_provider) for token accounting.
     "gemini":   ["gemini", "-p"],
     "qwen":     ["qwen", "-p"],
     "opencode": ["opencode", "run"],
@@ -130,9 +128,8 @@ class AgentContext:
     guardrails: Guardrails
     workdir: Path
     blackboard_scope: str = ""
-    # Where an agent that is allowed to execute writes its runs. Defaults to a
-    # directory beside the agent workdirs so a mission started anywhere still
-    # lands its provenance somewhere sane.
+    # Run directory for agents allowed to execute. Defaults to a sibling of the
+    # agent workdirs.
     runs: Path | None = None
 
 
@@ -147,15 +144,13 @@ class Agent:
     subscribes: tuple[str, ...] = ("*",)
     default_autonomy: Autonomy = Autonomy.BOUNDED
 
-    # Peer talk is handled by the base class rather than by each role: every
-    # agent can be asked a question, whatever job it was hired for.
+    # Peer questions are handled here so every role can answer them.
     PEER_ASK = "peer.ask"
     PEER_REPLY = "peer.reply"
     PEER_TOPICS = ("peer.ask", "peer.reply")
-    # Talk that is not about the work. Handled here too: being a colleague is
-    # not one role's job.
+    # Small-talk topics, also handled for every role.
     SOCIAL_TOPICS = ("greet", "greet.reply", "smalltalk")
-    # An order from the operator, and the answer every agent owes it.
+    # Operator orders; every agent must answer these.
     DIRECTIVE = "directive"
     VERDICT = "verdict"
     OPERATOR = "human"
@@ -170,11 +165,9 @@ class Agent:
         },
         "required": ["verdict", "position"],
     }
-    # How many turns a chat about nothing may run before it peters out, the way
-    # a real one does when someone's run finishes.
+    # Max replies in a small-talk exchange.
     SOCIAL_HOPS = 2
-    # A reply is never answered, so an exchange is two messages deep by
-    # construction; the cap is belt and braces against a role that forwards.
+    # Hard limit on reply depth for any exchange.
     MAX_HOPS = 3
 
     def __init__(self, name: str, ctx: AgentContext, provider: CLIProvider | None = None,
@@ -186,16 +179,14 @@ class Agent:
         self.system_prompt = system_prompt or self.__doc__ or ""
         self.workdir = ctx.workdir / name
         self.workdir.mkdir(parents=True, exist_ok=True)
-        # attach, not enroll: joining a mission must never overwrite the
-        # provider and model this agent was hired with.
+        # attach, not enroll: keep the provider and model the agent was hired with.
         self.hive.attach(name, self.role,
                          provider=(provider.name if provider else "builtin"),
                          autonomy=self.autonomy.value)
         self.persona = self.hive.ensure_persona(name, persona_mod.make)
         self._thread: str | None = None
-        # The role says what this agent does, the persona says who is doing it,
-        # and the map says where everyone is -- without which agents address
-        # each other by room, and invent rooms that are not there.
+        # System prompt = role + persona + operator authority + lab map + roster
+        # locations.
         self.system_prompt = "\n\n".join(filter(None, [
             self.system_prompt.strip(),
             persona_mod.prompt(name, self.persona),
@@ -213,16 +204,14 @@ class Agent:
         return self.hive.mailbox(self.name)
 
     def send(self, recipient: str, topic: str, **body: Any) -> Message:
-        # Everything said in answer to an order stays in that order's thread,
-        # which is what lets the brief collect a whole exchange afterwards.
+        # Replies stay in the order's thread so the brief can collect them.
         return self.hive.send(self.name, recipient, topic, body, thread=self._thread)
 
     def actor(self) -> dict[str, Any]:
-        """What the guardrails need in order to decide if this agent may execute.
+        """What the guardrails need to decide whether this agent may execute.
 
-        The identity file wins over the constructor default: `staff assign
-        --autonomy full` is the operator's decision and must not be quietly
-        overridden by a role's default.
+        The autonomy in identity.json (set by `staff assign`) overrides the role's
+        default.
         """
         ident = next((a for a in self.hive.roster() if a["name"] == self.name), {})
         return {"name": self.name,
@@ -232,15 +221,12 @@ class Agent:
     def publish(self, key: str, value: Any) -> None:
         self.hive.blackboard.put(key, value, agent=self.name)
 
-    # What may be recalled as context for work. Social notes are deliberately
-    # absent: an invented incident at the coffee machine must never come back
-    # as evidence in a scientific answer.
+    # Memory kinds recalled as work context. Social notes are excluded so small
+    # talk never appears as evidence.
     WORK_KINDS = ("memory", "note")
 
-    # Appended to every work prompt. Without it an agent that once opened an
-    # answer with a joke about the freezer keeps doing it: the joke is stored,
-    # recalled as its own memory, and repeated -- a fiction that reinforces
-    # itself one turn at a time.
+    # Appended to every work prompt to keep answers factual and free of persona
+    # chatter.
     WORK_GUARD = (
         "Answer the question itself. No scene-setting and no remarks about the "
         "room or the equipment around you. State only what the files, the "
@@ -250,11 +236,9 @@ class Agent:
     def recall(self, query: str, limit: int = 5,
                kinds: tuple[str, ...] | None = WORK_KINDS,
                everyone: bool = False) -> list[dict[str, Any]]:
-        """This agent's own notes by default.
+        """Search this agent's own notes by default.
 
-        The palace holds the whole lab's memory and `bioharness recall` searches
-        all of it, but priming one agent's prompt with another's recollections
-        made agents answer in each other's voices about work they never did.
+        Pass `everyone=True` to search the whole lab's memory.
         """
         return self.hive.palace.search(query, limit=limit, kinds=kinds,
                                        agent=None if everyone else self.name)
@@ -305,15 +289,13 @@ class Agent:
                 f"exactly which data is missing. At most 120 words.",
                 context=json.dumps(context or {}, indent=2, default=str)[:6000])
         except ProviderUnavailable as exc:
-            # Losing the provider mid-conversation is worth saying out loud;
-            # silence here would read as the colleague having no opinion.
+            # Report the provider failure instead of replying with nothing.
             return f"({self.role}) provider unavailable: {exc}"
 
     def handle_peer(self, msg: Message) -> None:
         """Answer a peer's question, or file a peer's answer.
 
-        A reply is deliberately never answered back. That single rule is what
-        keeps two chatty agents from talking until the budget runs out.
+        Replies are never answered, which bounds every exchange to two messages.
         """
         if msg.topic == self.PEER_REPLY:
             self.remember(f"{msg.sender} answered: "
@@ -335,10 +317,9 @@ class Agent:
 
     # -- LLM ---------------------------------------------------------------
     def think(self, prompt: str, context: str = "", guard: bool = True) -> str:
-        """Ask this agent's provider. Charged to the cost ledger and the budget.
+        """Ask this agent's provider; usage is charged to the cost ledger and budget.
 
-        `guard=False` is for talk that is not about the work: small talk is
-        supposed to be about the room and the imaginary freezer.
+        `guard=False` omits WORK_GUARD, for small talk.
         """
         if self.provider is None:
             raise ProviderUnavailable(f"agent {self.name!r} has no LLM provider configured")
@@ -357,9 +338,8 @@ class Agent:
         try:
             reply = self.provider.ask(full, cwd=self.workdir)
         except ProviderUnavailable as exc:
-            # Remember only permanent failures. Marking a provider dead because
-            # the service was briefly busy would take an agent offline for the
-            # rest of the mission over a blip.
+            # Only permanent failures mark the provider unavailable; transient errors
+            # are retried on the next call.
             if not getattr(exc, "retryable", False):
                 self._provider_dead = str(exc)
             self.hive.event("agent.provider_failed",
@@ -394,8 +374,7 @@ class Agent:
         try:
             return extract_json(raw, fallback)
         except ValueError:
-            # Silence here reads as "the model had no answer", which is wrong
-            # and undiagnosable. Record what actually came back.
+            # Record the raw output so an empty or unparseable reply is diagnosable.
             self.hive.event("agent.unparsed_reply",
                             {"agent": self.name, "chars": len(raw),
                              "head": raw[:400]})
@@ -403,11 +382,7 @@ class Agent:
 
     # -- being a colleague -------------------------------------------------
     def _in_character(self, instruction: str, fallback: str, context: str = "") -> str:
-        """A line in this agent's own voice, or a canned one with no LLM.
-
-        A deterministic agent going silent at the coffee machine is worse than
-        one that is a bit repetitive, so there is always something to say.
-        """
+        """A line in this agent's own voice, or a canned one when there is no LLM."""
         if self.provider is None:
             return fallback
         try:
@@ -458,8 +433,7 @@ class Agent:
 
         hops = int(msg.body.get("hops", 0) or 0)
         if hops >= self.SOCIAL_HOPS:
-            # Let it trail off. Two colleagues who cannot stop talking are a
-            # budget problem, not a personality.
+            # End the exchange once the hop limit is reached.
             return None
         reply = self._in_character(
             f"{msg.sender} says to you: \"{line}\". Reply the way you would in "
@@ -486,7 +460,7 @@ class Agent:
         acted = None
         try:
             acted = self.act_on_directive(order, msg)
-        except Exception as exc:  # noqa: BLE001 - a failure to act is a verdict too
+        except Exception as exc:  # noqa: BLE001 - reported as a verdict
             self.hive.event("agent.error", {"agent": self.name, "topic": msg.topic,
                                             "error": repr(exc)})
             acted = {"error": str(exc)}
@@ -542,15 +516,11 @@ class Agent:
         """Process one batch of inbox messages. Returns how many were handled."""
         rails = self.ctx.guardrails
         handled = 0
-        # The operator's mail is read first. An order should not wait behind a
-        # conversation about the coffee rota.
+        # Operator mail first, then everything else.
         inbox = sorted(self.mailbox.read(consume=True),
                        key=lambda m: (m.sender != self.OPERATOR, m.ts))
         for msg in inbox:
-            # Peer and social topics bypass `subscribes`: a role subscribes to
-            # the work it does, but anyone may be asked a question or said hello
-            # to. So does anything the operator sends -- an order dropped for
-            # being off-topic is exactly "they don't listen".
+            # Peer, social and operator topics bypass `subscribes`.
             peer = msg.topic in self.PEER_TOPICS
             social = msg.topic in self.SOCIAL_TOPICS
             from_operator = msg.sender == self.OPERATOR
@@ -575,15 +545,13 @@ class Agent:
                 self.hive.event("agent.blocked", {"agent": self.name, "reason": str(exc)})
                 self.send(msg.sender, "blocked", reason=str(exc), re=msg.id)
                 continue
-            except Exception as exc:  # noqa: BLE001 - an agent error is a message, not a crash
+            except Exception as exc:  # noqa: BLE001 - reported as a message
                 self.hive.event("agent.error", {"agent": self.name, "topic": msg.topic,
                                                 "error": repr(exc)})
                 self.send(msg.sender, "error", error=str(exc), re=msg.id, topic_in=msg.topic)
                 continue
             handled += 1
-            # A result is an answer, not a new question: replying to one would
-            # post `plan.request.result.result` to an agent that subscribes to
-            # no such topic, and reads as traffic that means nothing.
+            # Never reply to a result; that would create topics nobody handles.
             if result is not None and not msg.topic.endswith(".result"):
                 self.send(msg.sender, f"{msg.topic}.result", **result)
             self._thread = None
@@ -635,9 +603,8 @@ def _bracket_stack(fragment: str) -> list[str] | None:
 def repair_truncated_json(text: str) -> Any:
     """Close a JSON document that was cut off mid-structure.
 
-    Small local models routinely hit their token cap one brace short of valid
-    JSON. Rather than discard an otherwise good plan, walk back to the last
-    point that could end a value and close the open brackets from there.
+    Walks back to the last point that could end a value and closes the open
+    brackets from there. Used when a model hits its token limit mid-reply.
     """
     starts = [i for i in (text.find("{"), text.find("[")) if i >= 0]
     if not starts:
@@ -652,7 +619,7 @@ def repair_truncated_json(text: str) -> Any:
         fragment = body[:cut].rstrip().rstrip(",")
         stack = _bracket_stack(fragment)
         if stack is None or not stack:
-            continue          # ended mid-string, or nothing left open to close
+            continue          # unterminated string, or nothing to close
         closed = fragment + "".join("}" if c == "{" else "]" for c in reversed(stack))
         try:
             return json.loads(closed)

@@ -48,7 +48,7 @@ class LabScene {
     this.controls.minDistance = 3.5; this.controls.maxDistance = 95;
     this.controls.maxPolarAngle = Math.PI*.485; this.controls.minPolarAngle = .02;
     this.controls.zoomToCursor = true;
-    // Any manual drag cancels a camera flight, so the user is never fought.
+    // Any manual drag cancels a camera flight.
     this.controls.addEventListener('start', () => { this.tween = null; this.follow = null; this.stopTour(); });
     this.controls.screenSpacePanning = true;
     this.camera.position.set(...HOME.position); this.controls.target.set(...HOME.target);
@@ -112,7 +112,7 @@ class LabScene {
       mat = new THREE.MeshLambertMaterial({map:texture});
       if (key === 'screen') { mat.emissive.set('#4cb9af'); mat.emissiveIntensity = .55; this.glow = mat; }
     } else mat = new THREE.MeshLambertMaterial({color:key});
-    // Ceiling strips and doorway runners read as light sources, not paint.
+    // Emissive materials for ceiling strips and doorway runners.
     if (key === '#fff0c2' || key === '#e4d5a4') { mat.emissive.set(key); mat.emissiveIntensity = .9; }
     this.materials.set(key,mat);
     return mat;
@@ -137,7 +137,7 @@ class LabScene {
     }
   }
   sky() {
-    // A gradient sky dome, so the floating lab sits in open air rather than on a flat fill.
+    // Gradient sky dome.
     const dome = new THREE.Mesh(new THREE.SphereGeometry(300,32,16), new THREE.ShaderMaterial({
       side: THREE.BackSide, depthWrite: false, fog: false,
       uniforms: { top: {value: new THREE.Color(ZENITH)}, bottom: {value: new THREE.Color(HORIZON)} },
@@ -147,13 +147,13 @@ class LabScene {
     dome.renderOrder = -1; this.scene.add(dome);
   }
   ambience(rooms) {
-    // Warm pools of light in each room, without the cost of extra shadow maps.
+    // Point lights per room instead of extra shadow maps.
     for (const room of rooms) {
       const [cx,cz] = world(room.x+room.w/2, room.y+room.h/2);
       const lamp = new THREE.PointLight(room.id==='compute' ? '#9fd6ff' : '#ffd9a0', 9, 11, 1.6);
       lamp.position.set(cx, 3, cz); this.scene.add(lamp);
     }
-    // Indicator LEDs blink on their own rhythm.
+    // Indicator LEDs, each blinking on its own phase.
     if (this.leds.length) {
       const mesh = new THREE.InstancedMesh(this.geometry, new THREE.MeshBasicMaterial({color:'#ffffff'}), this.leds.length);
       const dummy = new THREE.Object3D();
@@ -164,7 +164,7 @@ class LabScene {
       });
       this.ledMesh = mesh; this.scene.add(mesh);
     }
-    // Dust motes drift through the light.
+    // Dust particles.
     const count = 420, positions = new Float32Array(count*3);
     for (let i=0; i<count; i++) {
       positions[i*3] = (Math.random()-.5)*36; positions[i*3+1] = .3+Math.random()*3.4; positions[i*3+2] = (Math.random()-.5)*21;
@@ -174,7 +174,7 @@ class LabScene {
     this.dust = new THREE.Points(dustGeometry, new THREE.PointsMaterial({
       color:'#fff6dc', size:.06, transparent:true, opacity:.55, depthWrite:false }));
     this.dustBase = positions.slice(); this.scene.add(this.dust);
-    // Voxel clouds drift below the floating foundation.
+    // Clouds below the foundation.
     const cloudMat = new THREE.MeshLambertMaterial({color:'#ffffff', transparent:true, opacity:.7});
     this.clouds = [];
     for (let i=0; i<14; i++) {
@@ -207,7 +207,7 @@ class LabScene {
       button.addEventListener('click', () => { this.stopTour(); this.visit(room); });
       destinations?.append(button);
     }
-    // A floating foundation with visible layered earth and an inset perimeter.
+    // Floating foundation: layered earth with an inset perimeter.
     this.staticBox(0,-1.15,0,37.3,.52,22.1,'dark');
     this.staticBox(0,-.64,0,37.6,.4,22.4,'metal');
     this.staticBox(0,-.25,0,37.6,.25,22.4,'tile');
@@ -219,7 +219,7 @@ class LabScene {
       const back=cz-d/2, front=cz+d/2;
       const floor=room.tile==='floor_wood' ? 'wood' : room.id==='compute' ? 'metal' : 'tile';
       this.staticBox(cx,.04,cz,w,.1,d,floor);
-      // Tiled surfaces have individually inset squares; wood is laid as long planks.
+      // Tiles are individually inset squares; wood is long planks.
       const step=room.tile==='floor_wood' ? 1.05 : .75;
       for (let x=-w/2+.05; x<w/2-.05; x+=step) for (let z=-d/2+.05; z<d/2-.05; z+=.75) {
         const tw=Math.min(step-.035,w/2-x-.03), td=Math.min(.715,d/2-z-.03);
@@ -238,7 +238,7 @@ class LabScene {
         }
       }
       for (const side of [-1,1]) this.box(wall,cx+side*(w/2+.1),.15,cz,.2,.66,d,'plaster');
-      // Low front walls keep the diorama readable. Door gaps match routing exactly.
+      // Low front walls keep the interior visible. Door gaps match the 2D routing.
       const door=(room.doorX-WIDTH/2)/UNIT, gap=48/UNIT;
       const fy=room.doorSide==='top'?back:front;
       const left=cx-w/2, right=cx+w/2;
@@ -284,7 +284,7 @@ class LabScene {
       this.staticBox(hx,.18,hz,1.8,.25,1.8,'dark');
       this.staticBox(hx,.44,hz,1.6,.03,1.6,'screen');
     }
-    // Environmental details: lights embedded along the perimeter and paths.
+    // Lights along the perimeter and paths.
     for(let x=-17;x<=17;x+=3.4) this.staticBox(x,.04,10.83,.65,.035,.1,'#e4d5a4');
     const dummy = new THREE.Object3D();
     for(const [material,boxes] of this.staticBoxes) {
@@ -295,7 +295,7 @@ class LabScene {
       mesh.castShadow=true;mesh.receiveShadow=true;mesh.computeBoundingSphere();this.scene.add(mesh);
     }
     this.staticBoxes.clear();
-    // Raycast target uses the exact floor bounds. Intersections outside are ignored.
+    // Raycast target covers exactly the floor bounds.
     this.ground = new THREE.Mesh(new THREE.PlaneGeometry(WIDTH/UNIT,DEPTH/UNIT),new THREE.MeshBasicMaterial({visible:false}));
     this.ground.rotation.x=-Math.PI/2;this.ground.position.y=.18;this.scene.add(this.ground);
     this.marker = new THREE.Group();
@@ -306,7 +306,7 @@ class LabScene {
     this.scene.add(this.marker);this.marker.visible=false;
     this.ready=true;
     this.host.querySelector('.scene-loading')?.remove();
-    // Fly in from high above the lab, unless the user prefers reduced motion.
+    // Intro flight from above, skipped for reduced-motion users.
     if (!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
       this.camera.position.set(-30,70,62); this.controls.target.set(0,-2,0); this.controls.update();
       this.fly(HOME.position, HOME.target, 2600);
@@ -358,7 +358,7 @@ class LabScene {
       const [x,z]=world(act.x,act.y);
       person.root.position.set(x,.2,z);
       const next=act.path[0];
-      // Turn toward the next waypoint smoothly instead of snapping.
+      // Turn smoothly toward the next waypoint.
       if(next && act.moving) person.heading=Math.atan2(next.x-act.x,next.y-act.y);
       const turn=Math.atan2(Math.sin(person.heading-person.root.rotation.y),Math.cos(person.heading-person.root.rotation.y));
       person.root.rotation.y+=turn*Math.min(1,dt*10);
@@ -368,7 +368,7 @@ class LabScene {
       person.arms[0].rotation.x=-stride;person.arms[1].rotation.x=stride;
       if(a.status==='working'&&!state.paused&&!act.moving) person.arms[1].rotation.x=-.7+Math.sin(phase)*.12;
       person.body.position.y=act.moving&&!state.paused?Math.abs(Math.sin(phase))*.04:0;
-      // Idle researchers breathe and shift their weight.
+      // Idle animation.
       const breath=!act.moving&&!state.paused?Math.sin(time/700+hash(a.name)):0;
       person.body.scale.y=1+breath*.012; person.body.rotation.z=breath*.015;
       person.label.point.set(x,2.28,z);
@@ -427,7 +427,7 @@ class LabScene {
       const readable = label.kind === 'agent-tag' ? distance < 30 || label.agent === state.agent
         : label.kind === 'room-tag' ? distance > 6 : true;
       const visible=readable&&p.z>=-1&&p.z<=1&&Math.abs(p.x)<1&&Math.abs(p.y)<1;
-      // Nearer labels sit on top, and far ones recede with the scene.
+      // Sort labels by depth and fade distant ones.
       label.element.style.zIndex=String(1000-Math.round(distance*10));
       label.element.style.opacity=label.kind==='room-tag'?String(THREE.MathUtils.clamp(1.4-distance/80,.45,1)):'';
       label.element.style.display=visible?'':'none';
@@ -484,7 +484,7 @@ class LabScene {
       if(k>=1) this.tween=null;
       return;
     }
-    // WASD walks the camera across the floor, relative to where it looks.
+    // WASD moves the camera relative to its heading.
     if(this.keys.size) {
       const forward=new THREE.Vector3().subVectors(this.controls.target,this.camera.position).setY(0).normalize();
       const right=new THREE.Vector3().crossVectors(forward,this.camera.up).normalize();
@@ -505,7 +505,7 @@ class LabScene {
         this.camera.position.copy(this.controls.target).add(offset);
       }
     }
-    // Follow mode: the camera rides along behind the chosen researcher.
+    // Follow mode: the camera trails the selected researcher.
     const person=this.follow&&this.people.get(this.follow);
     if(person) {
       const goal=person.root.position.clone().setY(1.1);
@@ -524,7 +524,7 @@ class LabScene {
     if(this.disposed)return;
     const width=this.host.clientWidth||800,height=this.host.clientHeight||500;
     this.camera.aspect=width/height;
-    // Narrow viewports widen the lens so the whole lab still fits on reset.
+    // Widen the field of view on narrow viewports so the lab fits on reset.
     this.camera.fov=THREE.MathUtils.clamp(36*1.6/this.camera.aspect,36,62);
     this.camera.updateProjectionMatrix();this.renderer.setSize(width,height,false);
   }
@@ -564,7 +564,7 @@ class LabScene {
   focus(name) {
     this.stopTour();
     const person=this.people.get(name);if(!person)return;
-    // Swoop down to a low, over-the-shoulder view and keep following.
+    // Move to an over-the-shoulder view and keep following.
     const target=person.root.position.clone().setY(1.1);
     const back=new THREE.Vector3(0,0,1).applyAxisAngle(new THREE.Vector3(0,1,0),person.root.rotation.y+Math.PI);
     const position=target.clone().addScaledVector(back,6.5).add(new THREE.Vector3(1.5,3.2,0));

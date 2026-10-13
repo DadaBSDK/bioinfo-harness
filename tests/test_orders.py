@@ -52,7 +52,7 @@ def test_an_order_reaches_a_role_that_subscribes_to_nothing_like_it(ctx: AgentCo
 
 
 def test_a_human_message_on_an_unknown_topic_is_still_answered(ctx: AgentContext):
-    """Silently dropping the operator's mail is exactly "they don't listen"."""
+    """Operator mail on any topic is answered."""
     ctx.hive.enroll("iris", "curator")
     iris = Curator("iris", ctx, provider=JSONProvider(
         {"verdict": "cannot do", "position": "No inputs are declared yet."}))
@@ -69,8 +69,7 @@ def test_the_operator_is_read_before_the_gossip(ctx: AgentContext):
     ctx.hive.send("quill", "iris", "smalltalk", {"line": "kettle's broken"})
     order(ctx, "iris", "Check the reads for run 12")
     iris.tick()
-    # The order was answered with a verdict; the chatter was answered too, but
-    # the operator's prompt was built first.
+    # Both messages were answered, the order first.
     assert "Check the reads" in provider.prompts[0]
 
 
@@ -177,8 +176,7 @@ def test_a_long_document_paginates():
 
 
 def test_a_full_operator_mailbox_does_not_look_like_a_busy_lab(ctx: AgentContext):
-    """Nothing consumes the human's inbox, so counting it meant no brief was
-    ever written."""
+    """Pending mail in the operator's own inbox does not block a brief."""
     from bioharness.cli import settled_orders
     ctx.hive.enroll("iris", "curator")
     given = order(ctx, "iris", "check the reads")
@@ -192,8 +190,7 @@ def test_a_full_operator_mailbox_does_not_look_like_a_busy_lab(ctx: AgentContext
 
 
 def test_a_brief_leads_with_what_actually_happened(ctx: AgentContext):
-    """The complaint that started this: a brief full of eloquent verdicts read
-    as though work had been done, when nothing had run."""
+    """The brief states first whether anything actually ran."""
     ctx.hive.enroll("hugo", "pi")
     given = order(ctx, "hugo", "fetch the banana data and run it")
     ctx.hive.send("hugo", "human", "verdict",
@@ -218,8 +215,7 @@ def test_a_brief_says_when_the_order_was_carried_out(ctx: AgentContext):
 
 
 def test_a_brief_counts_the_files_a_run_actually_wrote(ctx: AgentContext, tmp_path: Path):
-    """Artifacts live in the run's own ledger, not in the hive event log -- the
-    brief said "0 artifact(s)" with three FASTQs on disk."""
+    """Artifact counts are read from the run's own ledger."""
     ctx.hive.enroll("rex", "runner")
     given = order(ctx, "rex", "fetch the reads")
     run_dir = tmp_path / "runs" / "run-1"

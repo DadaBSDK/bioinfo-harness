@@ -109,8 +109,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
         mark = color("●", "green") if ok else color("○", "yellow")
         print(f"  {i}. {mark} {cap.id} — {cap.summary}")
     if args.emit:
-        # Reuse the planner's wiring so `plan --emit` and the planner agent
-        # cannot drift apart.
+        # Same wiring as the planner agent, so the two cannot diverge.
         from .agents.base import AgentContext
         from .agents.roles import Planner
         from .core.guardrails import Guardrails
@@ -175,8 +174,7 @@ def cmd_mission(args: argparse.Namespace) -> int:
                     f"agents will use deterministic fallbacks", "yellow"))
         provider = None
 
-    # Without --roles, staff the mission from whoever is already hired, using
-    # each agent's own provider rather than one provider for everybody.
+    # Without --roles, use the hired roster with each agent's own provider.
     if args.roles:
         agents = [ROLES[name](name, ctx, provider=provider) for name in args.roles]
         names = list(args.roles)
@@ -194,10 +192,8 @@ def cmd_mission(args: argparse.Namespace) -> int:
             names.append(ident["name"])
         print(color(f"staffed from the hive: {', '.join(names)}", "dim"))
 
-    # Send the kickoff to someone who actually subscribes to it. A PI is the
-    # natural recipient; a planner can start a mission on its own. Silently
-    # mailing "goal" to an agent that does not listen for it looks exactly like
-    # a mission that ran and found nothing.
+    # Send the kickoff to an agent that subscribes to `goal`: the PI, else the
+    # planner.
     body = dict(goal=args.goal, start_type=args.from_type,
                 goal_type=args.to_type, domain=args.domain)
     pi = next((a for a in agents if a.role == "pi"), None)
@@ -241,7 +237,7 @@ def welcome(hive: Hive, agents: list[Any], newcomer: str, quiet: bool = False) -
     for agent in greeters:
         try:
             agent.greet(newcomer, role)
-        except Exception as exc:  # noqa: BLE001 - a bad hello is not a crash
+        except Exception as exc:  # noqa: BLE001 - greeting failures are logged
             hive.event("attend.error", {"agent": agent.name, "error": repr(exc)})
     hive.event("social.welcome", {"newcomer": newcomer, "role": role,
                                   "by": [a.name for a in greeters]})
@@ -252,10 +248,9 @@ def welcome(hive: Hive, agents: list[Any], newcomer: str, quiet: bool = False) -
 
 def gossip(hive: Hive, agents: list[Any], rng: random.Random,
            quiet: bool = False) -> None:
-    """One agent says something to another that has nothing to do with the work.
+    """Have one agent make small talk with another.
 
-    Weighted by persona: the chatty ones start most of it, which is also true of
-    every lab I have worked in.
+    The speaker is weighted by persona chattiness.
     """
     if len(agents) < 2:
         return
@@ -278,13 +273,11 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
            seed: int | None = None, runs: str | None = None,
            dry_run: bool = False, brief_after: float = 20.0,
            only: list[str] | None = None) -> None:
-    """Keep the hired roster running: route mail, tick everyone, repeat.
+    """Keep the hired roster running: route mail, tick every agent, repeat.
 
-    Posting a message from the dashboard only drops it into a mailbox --
-    something has to turn the crank, or that message sits in an inbox forever
-    and every agent shows `awaiting`. This is that crank. It builds its own Hive
-    because the memory palace holds a SQLite connection that belongs to the
-    thread that opened it.
+    Messages posted from the dashboard are only acted on while this loop runs.
+    Builds its own Hive because the memory palace's SQLite connection is bound to
+    the thread that opened it.
     """
     hive = Hive(hive_root)
     ctx = AgentContext(hive=hive, registry=load_registry(capabilities),
@@ -295,11 +288,10 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
     agents: list[Any] = []
     key = None
     rng = random.Random(seed)
-    # Orders that already have a brief. Seeded from the log so a restart does
-    # not re-issue a document for every order the lab has ever been given.
+    # Threads that already have a brief, seeded from the event log so a restart
+    # does not re-brief old orders.
     briefed = {e["payload"].get("thread") for e in hive.events("brief.written")}
-    # Nobody greets the people who were already in the room when the lights came
-    # on -- only someone who arrives while the lab is running.
+    # Agents present at startup; only later arrivals are greeted.
     known = {a["name"] for a in hive.roster()}
     last_social = time.time()
     while not (stop and stop.is_set()):
@@ -319,12 +311,11 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
             try:
                 handled += agent.tick()
             except GuardrailTripped as exc:
-                # A tripped budget stops the loop, not the process: the operator
-                # should be told once rather than watch it spin.
+                # A tripped budget stops the loop, not the process.
                 hive.event("attend.halted", {"reason": str(exc)})
                 print(color(f"  budget guardrail tripped: {exc}", "yellow"))
                 return
-            except Exception as exc:  # noqa: BLE001 - one bad agent must not stop the room
+            except Exception as exc:  # noqa: BLE001 - isolate agent failures
                 hive.event("attend.error", {"agent": agent.name, "error": repr(exc)})
                 print(color(f"  {agent.name}: {exc}", "red"))
         hive.route()
@@ -336,12 +327,11 @@ def attend(hive_root: str, capabilities: list[str], max_usd: float = 5.0,
                 briefed.add(thread)
                 try:
                     write_brief(hive, thread, runs, quiet=quiet)
-                except Exception as exc:  # noqa: BLE001 - a failed brief is not fatal
+                except Exception as exc:  # noqa: BLE001 - brief failures are logged
                     hive.event("brief.failed", {"thread": thread, "error": repr(exc)})
                     print(color(f"  brief failed: {exc}", "red"))
 
-        # Only when the room is otherwise quiet: gossip never delays the work,
-        # and a busy lab has no time for it anyway.
+        # Small talk only when no mail was handled this tick.
         if social_every and not handled and time.time() - last_social >= social_every:
             gossip(hive, agents, rng, quiet=quiet)
             last_social = time.time()
@@ -358,8 +348,7 @@ def write_brief(hive: Hive, thread: str, runs: str | None,
     pdf = render(brief, out)
     hive.event("brief.written", {"thread": thread, "path": str(pdf),
                                  "verdicts": len(brief.get("verdicts", []))})
-    # It lands in the operator's own mailbox, so the brief shows up in the
-    # conversation next to the order that caused it.
+    # Deliver to the operator's mailbox so it appears next to the order.
     hive.send("system", "human", "brief",
               {"thread": thread, "path": str(pdf),
                "order": brief.get("order", ""),
@@ -373,14 +362,9 @@ def write_brief(hive: Hive, thread: str, runs: str | None,
 
 
 def settled_orders(hive: Hive, done: set[str], settle_after: float) -> list[str]:
-    """Orders whose thread has gone quiet, and which have no mail still moving.
-
-    A brief written while agents are still answering would be half a record, so
-    it waits for silence rather than for a fixed number of replies.
-    """
+    """Orders whose thread has gone quiet with no mail still in flight."""
     now = time.time()
-    # The operator's own mailbox is not a sign of life: nothing consumes it, so
-    # counting it means the lab never looks quiet and no brief is ever written.
+    # Ignore the operator's mailbox; nothing consumes it.
     if any(a.get("inbox_pending") for a in hive.roster()
            if a.get("role") != "operator"):
         return []
@@ -431,9 +415,7 @@ def cmd_ui(args: argparse.Namespace) -> int:
     print(f"  runs {dash.runs}")
     print(f"  hive {dash.hive_root}")
     if args.attend:
-        # The server never acts on what it receives: this is a separate loop
-        # that happens to share the process, exactly as `bioharness attend`
-        # would in another terminal.
+        # Runs the same loop as `bioharness attend`, in a background thread.
         threading.Thread(target=attend, daemon=True,
                          args=(args.hive, args.capabilities),
                          kwargs={"max_usd": args.max_usd, "quiet": True, "only": args.only,
@@ -458,7 +440,7 @@ def provider_for(identity: dict[str, Any]) -> Any:
         return None
     try:
         p = make_provider(kind, identity.get("model") or None)
-    except Exception as exc:  # noqa: BLE001 - a bad record must not kill the run
+    except Exception as exc:  # noqa: BLE001 - skip bad records
         print(color(f"  {identity['name']}: {exc}", "yellow"))
         return None
     if not p.available():
@@ -813,7 +795,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("\ninterrupted", file=sys.stderr)
         return 130
-    except Exception as exc:  # noqa: BLE001 - CLI reports errors, never tracebacks
+    except Exception as exc:  # noqa: BLE001 - print errors, not tracebacks
         print(color(f"error: {exc}", "red"), file=sys.stderr)
         if os.environ.get("BIOHARNESS_DEBUG"):
             raise

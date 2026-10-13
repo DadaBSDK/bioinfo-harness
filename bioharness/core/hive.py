@@ -1,13 +1,12 @@
 """The hive: per-agent memory, atomic-file mailboxes, a shared blackboard,
 an append-only event log, and a searchable memory palace.
 
-Deliberately file-based rather than a daemon or a socket. Every message, fact
-and memory is a plain file you can `cat` -- which matters when a run is
-half-finished on a cluster node at 3am, and which lets the harness work over
-NFS/Lustre where a local socket would not.
+Everything is plain files, so it can be inspected with standard tools and
+works on network filesystems (NFS, Lustre).
 
 Layout under <hive_root>:
 
+    lab.json                      the lab's name
     agents/<name>/identity.json   who the agent is, its role and provider
     agents/<name>/memory.md       the agent's own markdown memory
     agents/<name>/inbox/          messages the router delivered here
@@ -48,11 +47,8 @@ def atomic_write(path: Path, text: str) -> Path:
 
 
 def messages(d: Path) -> list[Path]:
-    """The message files in `d`, oldest first.
-
-    `atomic_write` leaves a `.tmp-*.json` beside its target while it writes, and
-    `Path.glob` -- unlike a shell -- happily returns dotfiles. Picking one of
-    those up means racing the writer for a half-finished message.
+    """The message files in `d`, oldest first, skipping in-progress `.tmp-*`
+    files.
     """
     return sorted(f for f in d.glob("*.json") if not f.name.startswith(".tmp-"))
 
@@ -73,9 +69,7 @@ class Mailbox:
              thread: str | None = None) -> Message:
         msg = Message(id=new_id("msg"), sender=self.name, recipient=recipient,
                       topic=topic, body=body, thread=thread)
-        # A message that answers nothing starts a thread of its own. That is
-        # what makes an order from the operator addressable afterwards: the
-        # whole exchange it caused shares its id.
+        # A message that answers nothing starts its own thread; replies share its id.
         if msg.thread is None:
             msg.thread = msg.id
         atomic_write(self.outbox / f"{msg.ts:.6f}-{msg.id}.json",
@@ -88,7 +82,7 @@ class Mailbox:
             try:
                 data = json.loads(f.read_text())
             except (json.JSONDecodeError, OSError):
-                continue  # a writer is mid-replace; it will be here next poll
+                continue  # mid-write; picked up next poll
             if topic and data.get("topic") != topic:
                 continue
             msgs.append(_msg_obj(data))
@@ -208,9 +202,7 @@ class MemoryPalace:
                kinds: Iterable[str] | None = None) -> list[dict[str, Any]]:
         """Search remembered notes, optionally restricted to certain kinds.
 
-        `kinds` is how work recall keeps out of the gossip: banter about an
-        imaginary freezer is a real memory for an agent, but it is not evidence
-        and must never turn up as context for a scientific judgement.
+        Work recall passes `kinds` to exclude social notes.
         """
         kinds = list(kinds) if kinds else []
         if self.fts:
@@ -430,12 +422,7 @@ class Hive:
         return persona
 
     def by_role(self, role: str) -> list[str]:
-        """Enrolled agent names filling `role`.
-
-        Agents address each other by name, but a role wants whoever is doing the
-        job today: a mission staffed from the hive has a `pi` called `hugo`, not
-        one called `pi`, and hardcoding the role name posts mail to nobody.
-        """
+        """Enrolled agent names filling `role`."""
         return [a["name"] for a in self.roster() if a.get("role") == role]
 
     def whois(self, who: str) -> str | None:
@@ -466,7 +453,7 @@ class Hive:
                     try:
                         data = json.loads(f.read_text())
                     except (json.JSONDecodeError, OSError):
-                        continue  # a writer is mid-replace
+                        continue  # mid-write
                     mid = data.get("id")
                     if mid and mid not in seen:
                         data["delivered"] = box != "outbox"
@@ -474,8 +461,8 @@ class Hive:
         ordered = sorted(seen.values(), key=lambda m: float(m.get("ts", 0.0)))
         return ordered[-limit:] if limit else ordered
 
-    # Talk about the work and small talk are both kept, in separate files: the
-    # first is evidence that may be recalled for work, the second never is.
+    # Work memory and social memory are kept in separate files; only work memory
+    # is recalled as context.
     MEMORY_FILES = {"memory": "memory.md", "social": "social.md"}
 
     def append_memory(self, agent: str, text: str, heading: str | None = None,

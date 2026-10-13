@@ -1,8 +1,5 @@
-"""Parse tool-specific metric files into one flat table for QC gating.
-
-Each tool reports quality differently -- fastp writes JSON, samtools writes
-prose, GROMACS writes a log. The validator only wants `{metric: number}`, so
-normalising happens here rather than in six different places.
+"""Parse tool-specific metric files into one flat `{metric: number}` table
+for QC gating.
 """
 from __future__ import annotations
 

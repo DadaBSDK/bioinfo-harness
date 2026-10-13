@@ -1,5 +1,4 @@
-# Structural bioinformatics: MD and docking. Same manifest schema, same core --
-# only the data types differ (pdb / topology / trajectory instead of fastq / bam).
+# Structural bioinformatics: MD and docking (pdb / topology / trajectory).
 capabilities:
   - id: pdb_fetch
     domain: structural

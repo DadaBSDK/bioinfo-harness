@@ -1,12 +1,8 @@
 """Gemini provider: agents backed by Google's Gemini API.
 
-Distinct from the Antigravity CLI, which authenticates with its own
-`AV_API_KEY` from the Antigravity dashboard rather than a Gemini API key. This
-provider takes an AI Studio key (`GEMINI_API_KEY` / `GOOGLE_API_KEY`) and talks
-to the Generative Language API directly.
-
-Model ids are discovered from the API rather than hardcoded -- Google's line-up
-moves, and a stale constant is worse than an extra round trip on startup.
+Takes an AI Studio key (`GEMINI_API_KEY` / `GOOGLE_API_KEY`) and calls the
+Generative Language API directly. Model ids are discovered from the API rather
+than hardcoded.
 """
 from __future__ import annotations
 
@@ -53,7 +49,7 @@ def _request(url: str, payload: dict[str, Any] | None, timeout: float,
         return json.loads(r.read())
 
 
-# Overload and rate limiting pass; a bad key or a missing model does not.
+# Retry overload and rate limiting; fail fast on bad key or missing model.
 RETRYABLE_STATUS = {429, 500, 502, 503, 504}
 
 
@@ -116,7 +112,7 @@ class GeminiProvider:
 
     def refresh(self) -> list[str]:
         self._models = available_models()
-        # With no model named, take the first the key can actually use.
+        # No model given: use the first one the key can access.
         if not self.model and self._models:
             preferred = ([m for m in self._models if m == "gemini-flash-latest"]
                          or [m for m in self._models if "flash" in m and "lite" not in m]
@@ -175,7 +171,7 @@ class GeminiProvider:
                 data = self._call(url, payload, key)
                 break
             except ProviderUnavailable as exc:
-                # Ride out a busy service rather than failing the mission for it.
+                # Retry transient overload.
                 if not exc.retryable or attempt == self.retries:
                     raise
                 time.sleep(min(8.0, 1.5 * (2 ** attempt)) + random.uniform(0, 0.4))
@@ -197,9 +193,8 @@ class GeminiProvider:
                 f"Gemini stopped without output (finishReason: {first['finishReason']})")
 
         usage = data.get("usageMetadata") or {}
-        # Gemini bills thinking separately from the visible answer, and it
-        # dominates: a two-token reply can carry ~190 thinking tokens. Counting
-        # only candidatesTokenCount under-reports usage by an order of magnitude.
+        # Count thinking tokens as output; Gemini reports them separately and they
+        # usually dominate.
         generated = (int(usage.get("candidatesTokenCount") or 0)
                      + int(usage.get("thoughtsTokenCount") or 0))
         return LLMReply(
@@ -208,9 +203,7 @@ class GeminiProvider:
             seconds=time.time() - started,
             tokens_in=int(usage.get("promptTokenCount") or 0),
             tokens_out=generated,
-            # Tokens are recorded; dollars are not, because this harness does
-            # not carry a verified Gemini price table. The ledger will show
-            # usage without inventing a cost.
+            # No verified Gemini price table, so cost is recorded as zero.
             usd=0.0,
         )
 
@@ -221,11 +214,8 @@ def peek_models() -> list[str] | None:
 
 
 def warm_models() -> None:
-    """Refresh the cache in the background.
-
-    The dashboard polls every few seconds and listing models is slow (a CLI
-    spawn or a network round trip). Blocking the request on it makes the whole
-    panel feel broken, so the endpoint reads the cache and this fills it.
+    """Refresh the model cache in the background so dashboard requests never wait
+    on a network round trip.
     """
     if _CACHE.get("warming"):
         return
@@ -234,7 +224,7 @@ def warm_models() -> None:
     def run() -> None:
         try:
             available_models(refresh=True)
-        except Exception:  # noqa: BLE001 - a warm-up must never take the server down
+        except Exception:  # noqa: BLE001 - warm-up is best effort
             pass
         finally:
             _CACHE["warming"] = False

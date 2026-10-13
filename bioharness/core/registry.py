@@ -190,13 +190,12 @@ def _probe_capability(cap: Capability) -> tuple[bool, str]:
     if cap.runtime is Runtime.PYTHON:
         if not cap.entrypoint:
             return False, "no entrypoint declared"
-        # The entrypoint module plus anything it imports lazily -- a capability
-        # whose heavy dependency is imported inside the function would otherwise
-        # probe as available and then fail mid-run.
+        # Check the entrypoint module and its `requires`, so lazily imported
+        # dependencies are probed too.
         for module in [cap.entrypoint.split(":")[0], *cap.requires]:
             try:
                 __import__(module)
-            except Exception as exc:  # noqa: BLE001 - report, never raise, during a probe
+            except Exception as exc:  # noqa: BLE001 - probes report, never raise
                 return False, f"import {module} failed: {exc}"
         deps = f" (+{', '.join(cap.requires)})" if cap.requires else ""
         return True, f"import {cap.entrypoint.split(':')[0]} ok{deps}"

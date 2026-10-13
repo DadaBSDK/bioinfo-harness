@@ -1,8 +1,5 @@
-"""Sprite atlas integrity.
-
-The floor renderer names sprites as strings. Nothing else checks that those
-names exist, so a renamed sprite would silently draw nothing -- these tests
-tie the JavaScript and the atlas together.
+"""Sprite atlas integrity: every sprite name used in app.js must exist in the
+atlas.
 """
 from __future__ import annotations
 
@@ -73,8 +70,9 @@ def test_every_sprite_the_ui_asks_for_exists(atlas):
 
 
 def test_every_seated_sprite_has_a_standing_counterpart(atlas):
-    """The renderer falls back to standing when an agent is walking, so a
-    seated sprite without its standing twin would pop between two people."""
+    """Walking agents switch to the standing sprite, so each seated sprite needs
+    one.
+    """
     frames = set(atlas["frames"])
     for name in (n for n in frames if n.startswith("sit_")):
         assert name.replace("sit_", "char_") in frames, f"{name} has no standing sprite"

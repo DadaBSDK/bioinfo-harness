@@ -19,7 +19,7 @@ const state = {
   chat: [], chatSeen: 0, briefs: [],
   log: null, logTab: 'stderr', sent: '', sending: false,
   staffOptions: null, hireMsg: '', hiring: false,
-  // Kept in state so a repaint never discards a half-filled form.
+  // Kept in state so a repaint does not clear a half-filled form.
   hireForm: { name: '', role: '', provider: 'builtin', model: '', autonomy: 'bounded' },
 };
 
@@ -32,7 +32,7 @@ const pill = s => `<span class="pill s-${esc(s)}">${esc(s)}</span>`;
 const chip = s => `<span class="chip c-${esc(s)}">${esc(s)}</span>`;
 const clock = ts => ts ? new Date(ts * 1000).toLocaleTimeString() : '';
 const initials = n => String(n || '?').slice(0, 2).toUpperCase();
-// Stable per-name colour so an agent keeps its identity across renders.
+// Stable colour per agent name.
 const hue = n => { let h = 0; for (const c of String(n)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const avatarFill = n => `hsl(${hue(n)} 42% 45%)`;
 const STATUS_COLOR = { working: 'var(--run)', awaiting: 'var(--accent)',
@@ -48,7 +48,7 @@ async function api(path, options) {
 }
 
 // ==========================================================================
-// The lab floor -- pixel art on a canvas, labels on an SVG layer above it
+// 2D lab floor: pixel art on a canvas, labels on an SVG layer above it
 // ==========================================================================
 const TILE = 32;
 const FW = 1152, FH = 672;
@@ -58,8 +58,8 @@ const WALL_H = 60;      // height of a room's back wall band
 const WT = 12;          // thickness of side and front walls
 const DOOR_W = 48;      // clear width of a doorway
 
-// Corridors. Every room's door opens onto one of these two lanes, and the
-// lanes are joined by the vertical gaps between the room columns.
+// Corridors: two horizontal lanes that every door opens onto, joined by the
+// gaps between room columns.
 const LANE_TOP = 266, LANE_BOTTOM = 534;
 const CONNECTORS = [380, 768];
 const WALK_SPEED = 78;
@@ -81,17 +81,14 @@ async function loadAtlas() {
   }
 }
 
-// x/y/w/h describe the room's INTERIOR floor. Walls are built around it, and
-// `doorX` is the centre of the only opening.
-//
-// What stands in each room is the instrument list from `agents/lab.py`, drawn
-// with the nearest sprite the atlas has, so the lab an agent describes is the
-// lab you can watch.
+// x/y/w/h is the room's interior floor; walls are built around it, and
+// `doorX` is the centre of its single doorway. Furniture mirrors the instrument
+// list in `agents/lab.py`.
 //
 //   wall        equipment along the back wall
-//   counter     a work surface across the room, which people stand at
+//   counter     a work surface across the room
 //   mid         [sprite, fx, fy] free-standing, mid-floor
-//   floorProps  [sprite, fx, fy] the front of the room, nearest the door
+//   floorProps  [sprite, fx, fy] near the door
 const ROOMS = [
   { id: 'planning', label: 'PLANNING OFFICE', x: 16, y: 72, w: 340, h: 156,
     tile: 'floor_wood', counter: true, doorSide: 'bottom', doorX: 186,
@@ -131,9 +128,7 @@ const ROOMS = [
     wall: ['desk_pc', 'whiteboard', 'shelving', 'printer', 'clock'],
     floorProps: [['filing_cabinet', 0.07, 0.64], ['plant', 0.94, 0.64]] },
 
-  // The lobby is a proper enclosed room too; its single door is in the top
-  // wall, opening onto the same lower corridor the labs open onto. It reads as
-  // reception: a waiting side, the coffee machine, and greenery.
+  // The lobby's door is in its top wall, onto the lower corridor.
   { id: 'lobby', label: 'WAITING LOBBY', x: 16, y: 568, w: 1116, h: 80,
     tile: 'floor_wood', backWall: false, doorSide: 'top', doorX: 574,
     roles: ['operator'], accent: '#9a968e', wall: [],
@@ -160,8 +155,7 @@ const spriteFor = a => ROLE_SPRITE[a.role] || SPRITE_POOL[hue(a.name) % SPRITE_P
 
 function roomById(id) { return ROOMS.find(r => r.id === id); }
 
-// Interior only: the walls are not walkable, so a point inside a wall belongs
-// to no room and gets pushed out to a corridor.
+// Interior only: a point inside a wall belongs to no room.
 function roomAt(x, y) {
   return ROOMS.find(r => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h);
 }
@@ -200,7 +194,7 @@ function doorPoints(room) {
         outside: { x, y: room.y + room.h + WT + 16 } };
 }
 
-/** Keep a destination somewhere a person could actually stand. */
+/** Clamp a destination to a walkable point. */
 function sanitizeTarget(x, y) {
   const r = roomAt(x, y);
   if (r) return { x, y };
@@ -208,9 +202,8 @@ function sanitizeTarget(x, y) {
 }
 
 /**
- * Walk from one point to another using doors and corridors only -- never
- * through a wall. Inside a room the route first slides across to the door,
- * steps out, follows a corridor lane, then enters the target room's door.
+ * Route between two points through doors and corridors only: to the door,
+ * along a corridor lane, then in through the target room's door.
  */
 function buildRoute(fx, fy, tx, ty) {
   const A = roomAt(fx, fy), B = roomAt(tx, ty);
@@ -245,16 +238,14 @@ function buildRoute(fx, fy, tx, ty) {
 }
 
 // -- speech bubbles --------------------------------------------------------
-// An utterance hangs over the speaker's head for a few seconds. Long enough to
-// read at a glance, short enough that a busy room does not become a wall.
+// Speech bubbles: shown over the speaker for a few seconds.
 const BUBBLE_MS = 8000;
 const BUBBLE_COLS = 34;        // characters per line
-const BUBBLE_LINES = 3;        // then it is truncated; the chat tab has the rest
+const BUBBLE_LINES = 3;        // max lines, then truncated
 const BUBBLE_CH = 5.6;         // width of one character at 10px
 const BUBBLE_LH = 13;
 
-// Models answer in markdown. A 34-column bubble has no room to render it, so
-// the markers are stripped rather than shown as literal asterisks.
+// Bubbles are plain text, so markdown markers are stripped.
 const demark = t => String(t || '').replace(/\*\*|__|`/g, '').replace(/^#+\s*/gm, '');
 
 function wrapLines(text, cols = BUBBLE_COLS, max = BUBBLE_LINES) {
@@ -297,39 +288,35 @@ function syncWorld() {
   if (state.agent && !pos[state.agent]) state.agent = null;
   if (WORLD.seen.size > 2000) WORLD.seen = new Set([...WORLD.seen].slice(-1000));
 
-  // A routed message becomes an errand: the sender walks over to where the
-  // recipient is standing, pauses with them, then heads back. Aiming for the
-  // recipient's desk instead would make two people replying to each other
-  // swap rooms.
+  // A routed message becomes an errand: the sender walks to the recipient's
+  // current position, pauses, then returns to their station.
   const now = Date.now() / 1000;
   const TALKING_DISTANCE = 74;
   for (const t of state.floor?.traffic || []) {
     const key = `${t.from}>${t.to}@${t.ts}`;
     if (WORLD.seen.has(key)) continue;
     WORLD.seen.add(key);
-    if (now - t.ts > 45) continue;            // don't replay old history on load
+    if (now - t.ts > 45) continue;            // skip messages older than 45 s
     const from = WORLD.actors[t.from], to = WORLD.actors[t.to];
     if (!from || !to || t.from === t.to) continue;
 
-    // Whoever is being spoken to stays put long enough to be reached, instead
-    // of wandering back to their station mid-sentence.
+    // Keep the recipient in place until the sender arrives.
     to.wait = Math.max(to.wait, 2.4);
     if (Math.hypot(to.x - from.x, to.y - from.y) < TALKING_DISTANCE) {
-      from.path = [];                        // already face to face: just talk
+      from.path = [];                        // already together
       from.errand = { to: t.to, topic: t.topic };
       from.wait = Math.max(from.wait, 1.8);
       from.facing = to.x < from.x ? -1 : 1;
       continue;
     }
-    const side = to.x > FW / 2 ? -34 : 34;   // stand beside them, not on them
+    const side = to.x > FW / 2 ? -34 : 34;   // stand beside the recipient
     const spot = sanitizeTarget(to.x + side, to.y);
     from.path = buildRoute(from.x, from.y, spot.x, spot.y);
     from.errand = { to: t.to, topic: t.topic };
     from.wait = 1.8;
   }
 
-  // What was actually said, over the speaker's head. Old lines are skipped on
-  // first load so opening the tab does not replay the whole mission at once.
+  // Show recent utterances as bubbles; skip old ones on first load.
   for (const c of state.floor?.chatter || []) {
     const key = `say:${c.id}`;
     if (WORLD.seen.has(key)) continue;
@@ -420,7 +407,7 @@ function tileRect(ctx, name, x, y, w, h) {
   ctx.restore();
 }
 
-/** A solid wall segment: cream face with a dark edge, matching the tile art. */
+/** A solid wall segment. */
 function wallRect(ctx, x, y, w, h) {
   if (w <= 0 || h <= 0) return;
   ctx.fillStyle = WALL_EDGE;
@@ -429,9 +416,8 @@ function wallRect(ctx, x, y, w, h) {
   ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
 }
 
-/** Draws the full enclosure: back band, both sides, and the front wall with
- *  its doorway gap. The gap is simply not painted, so the corridor floor
- *  already laid down shows through it. */
+/** The room enclosure: back band, side walls, and a front wall with an
+ *  unpainted doorway gap. */
 function drawShell(ctx, room) {
   const { x, y, w, h } = room;
   const ox = x - WT, ow = w + WT * 2;
@@ -450,7 +436,7 @@ function drawShell(ctx, room) {
     }
   }
 
-  // Side walls run the full height and tuck into the front wall.
+  // Side walls run full height into the front wall.
   wallRect(ctx, ox, y, WT, h + WT);
   wallRect(ctx, x + w, y, WT, h + WT);
 
@@ -467,7 +453,7 @@ function drawShell(ctx, room) {
     wallRect(ctx, ox, y + h, ow, WT);
   }
 
-  // Door jambs, so the opening reads as a doorway rather than a missing wall.
+  // Door jambs.
   ctx.fillStyle = WALL_EDGE;
   ctx.fillRect(gap0 - 2, frontY, 3, WT);
   ctx.fillRect(gap1 - 1, frontY, 3, WT);
@@ -476,8 +462,7 @@ function drawShell(ctx, room) {
 }
 
 function drawCounter(ctx, room) {
-  // Only the middle section is a straight run -- the supplied end caps are
-  // L-shaped corner pieces and read as stray blocks in a straight wall.
+  // Use only the straight middle tile; the end caps are corner pieces.
   const m = frame('counter_m');
   if (!m) return;
   const sc = 1.15;
@@ -493,9 +478,7 @@ function drawCounter(ctx, room) {
   ctx.restore();
 }
 
-/** The circulation space: two horizontal lanes joined by two vertical ones.
- *  Painting it lighter than the surrounding slab is what makes the building
- *  read as rooms-and-corridors rather than boxes on a dark field. */
+/** Corridor floor: two horizontal lanes joined by two vertical ones. */
 function drawCorridors(ctx) {
   const LANE_W = 46;
   const lanes = [
@@ -504,14 +487,13 @@ function drawCorridors(ctx) {
     ...CONNECTORS.map(x => [x - LANE_W / 2, LANE_TOP, LANE_W, LANE_BOTTOM - LANE_TOP]),
   ];
   ctx.save();
-  // A different surface from the rooms and from the slab around them: tiled,
-  // lighter, and edged. A corridor you cannot see is just a gap between boxes.
+  // Tiled, lighter and edged, to separate corridors from rooms and slab.
   for (const [x, y, w, h] of lanes) {
     tileRect(ctx, 'floor_tile', x, y, w, h);
     ctx.fillStyle = 'rgba(20,26,30,0.34)';
     ctx.fillRect(x, y, w, h);
   }
-  // A worn centre line down each lane, the way a much-walked floor goes.
+  // Worn centre line down each lane.
   ctx.strokeStyle = 'rgba(255,252,240,0.06)';
   ctx.lineWidth = 12;
   ctx.beginPath();
@@ -519,7 +501,7 @@ function drawCorridors(ctx) {
   ctx.moveTo(0, LANE_BOTTOM); ctx.lineTo(FW, LANE_BOTTOM);
   for (const x of CONNECTORS) { ctx.moveTo(x, LANE_TOP); ctx.lineTo(x, LANE_BOTTOM); }
   ctx.stroke();
-  // Edge lines, drawn only where a lane meets open slab rather than a wall.
+  // Edge lines where a lane meets open slab.
   ctx.strokeStyle = 'rgba(0,0,0,0.45)';
   ctx.lineWidth = 2;
   ctx.beginPath();
@@ -531,8 +513,7 @@ function drawCorridors(ctx) {
   ctx.restore();
 }
 
-/** Skirting board along the foot of the back wall, and the soft shadow the
- *  wall casts into the room. Cheap, and it stops rooms reading as flat. */
+/** Skirting board and wall shadow along the back wall. */
 function drawWallFoot(ctx, room) {
   if (room.backWall === false) return;
   const f = frame('wall_skirting');
@@ -553,8 +534,7 @@ function drawWallFoot(ctx, room) {
   ctx.fillRect(room.x, room.y, room.w, 34);
 }
 
-/** A pool of light from the room's own strip lights, plus a doormat in the
- *  doorway so the threshold reads as a way through. */
+/** Room lighting pool and a doormat at the doorway. */
 function drawRoomLight(ctx, room) {
   const cx = room.x + room.w / 2, cy = room.y + room.h * 0.45;
   const g = ctx.createRadialGradient(cx, cy, 10, cx, cy, Math.max(room.w, room.h) * 0.62);
@@ -574,12 +554,10 @@ function drawThreshold(ctx, room) {
   ctx.restore();
 }
 
-/** The plate behind a room's name on the wall band, in the room's own colour.
- *  The text itself stays in the SVG layer, where it renders crisply. */
+/** Name plate on the wall band; the text itself is drawn in the SVG layer. */
 function drawSign(ctx, room) {
   const w = room.label.length * 6.6 + 26, h = 20;
-  // A room with no wall band wears its sign inside, on the right: the left of
-  // the lobby is where whoever is waiting stands, and the two collided.
+  // Rooms without a wall band show the sign inside, on the right.
   const inside = room.backWall === false;
   const x = inside ? room.x + room.w - w - 6 : room.x + 4;
   const y = inside ? room.y + 2 : room.y - WALL_H + 2;
@@ -614,8 +592,7 @@ function paintCanvas() {
   const staffed = new Set(actors.map(a => a.home?.room));
 
   for (const room of ROOMS) {
-    // An unstaffed room is not just dimmer, it is colder: the lights are off in
-    // there, which reads at a glance across six rooms.
+    // Unstaffed rooms are drawn darker and cooler.
     const lit = staffed.has(room.id);
     ctx.globalAlpha = lit ? 1 : 0.66;
     if (room.tile) {
@@ -647,7 +624,7 @@ function paintCanvas() {
     ctx.globalAlpha = 1;
   }
 
-  // Highlight the room under the cursor / the selected agent's room.
+  // Highlight the hovered room and the selected agent's room.
   const focusRoom = WORLD.hover ? WORLD.actors[WORLD.hover]?.home?.room
                                 : WORLD.actors[state.agent]?.home?.room;
   const fr = focusRoom && roomById(focusRoom);
@@ -674,8 +651,7 @@ function paintCanvas() {
     }
   });
 
-  // A vignette, last: it sits over everything and pulls the eye to the middle
-  // of the building instead of its corners.
+  // Vignette over everything.
   const v = ctx.createRadialGradient(FW / 2, FH / 2, FH * 0.34,
                                      FW / 2, FH / 2, FH * 0.92);
   v.addColorStop(0, 'rgba(0,0,0,0)');
@@ -687,14 +663,12 @@ function paintCanvas() {
 const CHAR_H = 34 * SCALE;
 
 // -- overlay ---------------------------------------------------------------
-// Built once per roster change with coordinates relative to each actor, then
-// moved every frame with a transform rather than rebuilt at 60fps.
+// Built once per roster change, then moved each frame with transforms.
 function floorOverlay() {
   const f = state.floor;
   if (!f) return '';
 
-  // Rooms with a back wall band get their name on the wall; the lobby has no
-  // band, so its name goes just inside its own front wall.
+  // Room names go on the wall band, or inside the front wall for the lobby.
   const labels = ROOMS.map(r => (r.backWall === false
     ? `<text class="room-label" text-anchor="end" x="${r.x + r.w - 12}"
              y="${r.y + 17}">${esc(r.label)}</text>`
@@ -738,7 +712,7 @@ function paintOverlay() {
 
   paintBubbles(svg);
 
-  // Wires are redrawn each frame because their endpoints are moving.
+  // Wires are redrawn each frame because their endpoints move.
   const wires = svg.querySelector('.wires');
   if (!wires) return;
   const now = Date.now() / 1000;
@@ -753,16 +727,13 @@ function paintOverlay() {
     }).join('');
 }
 
-// Bubbles live in the SVG layer rather than in HTML above it, so they inherit
-// the same viewBox mapping as the labels and stay pinned to a moving sprite.
+// Bubbles live in the SVG layer so they share the labels' viewBox mapping.
 function paintBubbles(svg) {
   const layer = svg.querySelector('.bubbles');
   if (!layer) return;
   const now = performance.now();
   const parts = [];
-  // Two people at neighbouring desks talk at the same time often enough that
-  // overlapping bubbles are unreadable. Anything that would cover a bubble
-  // already placed gets lifted above it instead.
+  // Lift any bubble that would overlap one already placed.
   const placed = [];
   const speakers = Object.values(WORLD.actors)
     .filter(a => a.bubble && a.bubble.until >= now)
@@ -800,7 +771,7 @@ function paintBubbles(svg) {
   layer.innerHTML = parts.join('');
 }
 
-// The lab is called whatever the operator named it; until then, Voxel Lab.
+// Operator-chosen lab name; defaults to Voxel Lab.
 function labName() {
   return state.floor?.lab_name || 'Voxel Lab';
 }
@@ -894,12 +865,11 @@ function svgPoint(evt, svg) {
 function walkTo(name, x, y) {
   const act = WORLD.actors[name];
   if (!act) return;
-  // Clicking a wall would otherwise ask someone to stand inside it; snap the
-  // destination to the nearest place a person could actually stand.
+  // Snap the destination to the nearest walkable point.
   const t = sanitizeTarget(Math.max(12, Math.min(FW - 12, x)),
                            Math.max(40, Math.min(FH - 8, y)));
   act.path = buildRoute(act.x, act.y, t.x, t.y);
-  act.wait = 2.5;          // linger where sent before drifting back to station
+  act.wait = 2.5;          // seconds to wait before returning to station
   act.errand = null;
 }
 
@@ -1055,13 +1025,12 @@ function ccBody() {
            graph: ccGraph }[state.cc]();
 }
 
-// `directive` first: it is what the operator sends most, and the only topic
-// every agent must answer.
+// `directive` first: the most common topic, and every agent must answer it.
 const TOPICS = ['directive', 'goal', 'peer.ask', 'smalltalk', 'greet',
                 'plan.request', 'data.validate', 'qc.check', 'analyze', 'report'];
 
-// Built once per tab switch. Everything that ticks is updated in place below,
-// so the message box is never destroyed under the user's cursor.
+// Built once per tab switch; live parts are updated in place so the message
+// box keeps focus.
 function floorScaffold() {
   return `<div class="floorwrap">
     <div class="stage">
@@ -1139,10 +1108,8 @@ function paintFloor() {
   $('#cc-sub').innerHTML = head.sub;
   updateHTML($('#cc-tabs'), CC_TABS.map(t =>
     `<button data-cc="${t}" aria-pressed="${state.cc === t}" class="${state.cc === t ? 'on' : ''}">${PANEL_NAMES[t]}</button>`).join(''));
-  // Build the stage once; after that only the pixels and the overlay change.
-  // Recreating the canvas every tick would discard the drawing and flicker.
-  // Rebuild the overlay only when the roster changes; the animation loop moves
-  // the existing groups every frame.
+  // Build the stage once, then update only the canvas and overlay. The overlay
+  // is rebuilt only when the roster changes.
   const overlay = $('.flooroverlay');
   const roster = (state.floor?.agents || []).map(a => a.name).join(',');
   const stage = $('#stage');
@@ -1159,12 +1126,12 @@ function paintFloor() {
   paintOverlay();
   updateHTML($('#strip'), workerStripInner());
 
-  // Only repaint the body when nothing inside it is being typed into.
+  // Skip repainting while a field inside is focused.
   const body = $('#cc-body');
   if (!(body.contains(document.activeElement) && document.activeElement.matches('input, textarea, select'))) updateHTML(body, ccBody());
 
-  // Rebuild the recipient list only when the roster actually changes, so the
-  // dropdown does not reset while it is open.
+  // Rebuild the recipient list only when the roster changes, so an open
+  // dropdown is not reset.
   const names = (state.floor?.agents || []).map(a => a.name);
   const sel = $('#qto');
   if (sel && sel.dataset.names !== names.join(',')) {
@@ -1272,11 +1239,11 @@ const TOPIC_LABEL = {
   'run.request': 'run it', 'run.request.result': 'ran it',
   'directive': 'ORDER', 'verdict': 'verdict', 'brief': 'brief',
 };
-// Talk that is not about the work reads differently from a work order.
+// Small-talk topics get their own styling.
 const SOCIAL_TOPICS = ['greet', 'greet.reply', 'smalltalk'];
 
-// Escape first, then promote the two markdown forms an agent actually uses.
-// Order matters: doing it the other way round would let a message inject HTML.
+// Escape HTML first, then render **bold** and `code`. Reversing the order
+// would allow HTML injection.
 function richSay(text) {
   return esc(text)
     .replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>')
@@ -1476,16 +1443,14 @@ function render() {
     return paintFloor();
   }
 
-  // Classic views rebuild wholesale; skip the repaint while a field in them has
-  // focus so a search box is not cleared mid-word.
+  // Skip repainting while a field is focused.
   const shell = $('#shell');
   if (shell.contains(document.activeElement) &&
       /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) return;
   const view = { chat: viewChat, runs: viewRuns, hive: viewHive,
                  caps: viewCaps, cost: viewCost }[state.tab];
-  // The transcript is rebuilt wholesale like every other classic view, so the
-  // scroll position has to be carried across by hand -- and only followed to
-  // the bottom if the reader was already there, never while they read history.
+  // Preserve the transcript's scroll position across rebuilds; follow new
+  // messages only if already at the bottom.
   const before = $('#chatlog');
   const stick = !before ||
     before.scrollHeight - before.scrollTop - before.clientHeight < 60;
@@ -1546,7 +1511,7 @@ async function loadLog(step) {
   render();
 }
 
-/** Copy whatever is currently in the hire fields into state. */
+/** Copy the hire form fields into state. */
 function syncHireForm() {
   const f = state.hireForm;
   const get = id => $(`#${id}`)?.value;
@@ -1571,7 +1536,7 @@ async function hireAgent() {
   state.hireMsg = r.ok ? `hired ${r.agent.name} as ${r.agent.role}` : `refused: ${r.error}`;
   if (r.ok) state.hireForm.name = '';
   await refresh();
-  // The roster changed, so the cc body is stale even though it holds focus.
+  // The roster changed, so re-render the panel even though it has focus.
   const b = $('#cc-body'); if (b) { b.dataset.rendered = ''; b.innerHTML = ccBody(); }
 }
 
@@ -1597,8 +1562,7 @@ async function sendMessage() {
   const to = $('#qto')?.value, topic = $('#qtopic')?.value || 'goal';
   state.draft = originalDraft; state.recipient = to; state.topic = topic;
   state.sending = true; render();
-  // Each topic wants its own field name; `peer.ask` posts a question, and
-  // sending one as `note` would reach the agent with nothing to answer.
+  // Each topic expects a different body field.
   const body = topic === 'directive' ? { order: text }
     : topic === 'goal' ? { goal: text }
     : topic === 'peer.ask' ? { question: text, hops: 0 }
@@ -1645,8 +1609,8 @@ document.addEventListener('click', e => {
     const svg = e.target.ownerSVGElement;
     const p = svg && svgPoint(e, svg);
     if (!p) return;
-    // With someone selected, clicking the floor sends them walking there.
-    // With nobody selected, it just clears the selection.
+    // With an agent selected, a click sends them there; otherwise it clears the
+    // selection.
     if (state.agent && WORLD.actors[state.agent]) return walkTo(state.agent, p.x, p.y);
     state.agent = null;
     return render();
@@ -1717,7 +1681,7 @@ window.labBridge = {
   },
 };
 window.addEventListener('lab3d-ready', () => { if (state.tab === 'floor') render(); });
-// Failed module loads must leave a usable floor, including browsers without import maps.
+// If the 3D module fails to load, fall back to the 2D floor.
 setTimeout(() => {
   if (!window.Lab3D && state.scene3d) window.labBridge.fail('3D engine could not load. Showing the 2D lab.');
 }, 12000);

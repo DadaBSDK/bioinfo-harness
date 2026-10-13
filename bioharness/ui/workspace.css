@@ -1,4 +1,4 @@
-/* Daylight workspace. Deliberately distinct from the pixel-art scene itself. */
+/* Workspace layout and theme: navigation rail, stage and side panel. */
 :root {
   color-scheme: light;
   --bg: #f6f7f9; --panel: #ffffff; --ink: #273244; --muted: #7a8493;
@@ -178,7 +178,7 @@ textarea.queue::placeholder { color: #a6adb5; }
   .wcard { min-width: 142px; }
   .classic section { padding: 22px 14px; }
 }
-/* Fullscreen turns the lab into the whole window. */
+/* Fullscreen lab view. */
 .lab3d:fullscreen { background: #e9efec; border-radius: 0; }
 .lab3d:fullscreen .scene-camera { bottom: 56px; right: 24px; }
 .lab3d:fullscreen .scene-instructions { bottom: 22px; left: 24px; font-size: 10px; }

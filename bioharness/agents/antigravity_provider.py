@@ -1,13 +1,10 @@
 """Antigravity CLI provider.
 
-`agy` is Google's successor to the Gemini CLI. It is worth a dedicated provider
-rather than the generic CLI wrapper for two reasons: `--output-format json`
-returns real token usage (including thinking and cache reads) instead of a
-character-count estimate, and it fronts several model families at once --
-Gemini, Claude and GPT-OSS -- so one credential covers a lot of ground.
+A dedicated provider rather than the generic CLI wrapper because
+`--output-format json` reports real token usage (including thinking and cache
+reads), and one credential covers several model families.
 
-It authenticates itself (OAuth, or AV_API_KEY in CI); the harness never handles
-that credential.
+The CLI handles its own authentication (OAuth, or AV_API_KEY in CI).
 """
 from __future__ import annotations
 
@@ -25,8 +22,7 @@ from .base import LLMReply, ProviderUnavailable
 BINARY = "agy"
 EFFORTS = ("low", "medium", "high")
 
-# The CLI is slow to start even when the model answers quickly, so failures
-# that look like hangs are usually startup plus auth, not inference.
+# Generous timeout: CLI startup and auth dominate, not inference.
 LIST_TIMEOUT = 60.0
 
 
@@ -34,8 +30,7 @@ def binary_present() -> bool:
     return shutil.which(BINARY) is not None
 
 
-# Listing models spawns the CLI and takes seconds. The dashboard asks on every
-# poll, so the answer is cached briefly; the set changes rarely.
+# Model listing spawns the CLI, so results are cached briefly.
 _CACHE: dict[str, Any] = {"models": None, "at": 0.0}
 CACHE_TTL = 300.0
 
@@ -75,8 +70,7 @@ class AntigravityProvider:
     name: str = "antigravity"
     model: str = ""
     effort: str = ""
-    # When set, the CLI enforces this JSON schema on the reply. Far more
-    # reliable than asking politely for "JSON only" in the prompt.
+    # JSON schema the CLI enforces on the reply, when set.
     json_schema: str = ""
     timeout_s: float = 600.0
     _models: list[str] = field(default_factory=list)
@@ -106,10 +100,8 @@ class AntigravityProvider:
         reply = self._ask_once(prompt, cwd, env, schema=self.json_schema)
         if reply.text or not self.json_schema:
             return reply
-        # The higher-effort tiers (flash-medium/high) sometimes finish a
-        # schema-constrained turn agentically and emit nothing at all -- real
-        # thinking tokens, empty output. The plain prompt still answers, so
-        # rather than lose the turn, ask again without the constraint.
+        # Higher-effort tiers sometimes return empty output for schema-constrained
+        # prompts; retry once without the schema.
         retry = self._ask_once(prompt, cwd, env, schema="")
         retry.tokens_in += reply.tokens_in
         retry.tokens_out += reply.tokens_out
@@ -158,14 +150,11 @@ class AntigravityProvider:
                 retryable=status in ("TIMEOUT", "RATE_LIMITED", "UNAVAILABLE"))
 
         usage = data.get("usage") or {}
-        # Thinking is generated output and is billed as such; counting only
-        # output_tokens would under-report every reasoning model here.
+        # Count thinking tokens as output; they are billed as such.
         generated = (int(usage.get("output_tokens") or 0)
                      + int(usage.get("thinking_tokens") or 0))
-        # With --json-schema the CLI puts the validated object in
-        # `structured_output` and may leave `response` empty, or fill it with
-        # fenced JSON plus a trailing tool line. The structured field is the
-        # authoritative one, so prefer it and hand back clean JSON text.
+        # With --json-schema, prefer `structured_output` over `response`, which may
+        # be empty or wrapped in a code fence.
         structured = data.get("structured_output")
         text = (json.dumps(structured) if structured is not None
                 else str(data.get("response", "")))
@@ -187,11 +176,8 @@ def peek_models() -> list[str] | None:
 
 
 def warm_models() -> None:
-    """Refresh the cache in the background.
-
-    The dashboard polls every few seconds and listing models is slow (a CLI
-    spawn or a network round trip). Blocking the request on it makes the whole
-    panel feel broken, so the endpoint reads the cache and this fills it.
+    """Refresh the model cache in the background so dashboard requests never wait
+    on a CLI spawn.
     """
     if _CACHE.get("warming"):
         return
@@ -200,7 +186,7 @@ def warm_models() -> None:
     def run() -> None:
         try:
             available_models(refresh=True)
-        except Exception:  # noqa: BLE001 - a warm-up must never take the server down
+        except Exception:  # noqa: BLE001 - warm-up is best effort
             pass
         finally:
             _CACHE["warming"] = False

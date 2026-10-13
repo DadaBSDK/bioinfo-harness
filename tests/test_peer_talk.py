@@ -51,8 +51,7 @@ def test_whois_resolves_a_role_to_a_hired_name(ctx: AgentContext):
 
 
 def test_pi_delegates_to_the_planner_by_role_not_by_name(ctx: AgentContext):
-    """Mailing the literal string "planner" would reach nobody on a roster of
-    real names."""
+    """The PI addresses the planner by role, resolved to the hired agent's name."""
     ctx.hive.enroll("ada", "planner")
     hugo = PI("hugo", ctx)
     hugo.handle(_msg(ctx, "human", "hugo", "goal", goal="call variants"))
@@ -90,7 +89,7 @@ def test_a_peer_question_is_answered_whatever_the_role_subscribes_to(ctx: AgentC
 
 
 def test_an_answer_is_never_answered_back(ctx: AgentContext):
-    """The rule that keeps two agents from talking until the budget is gone."""
+    """Replies are never answered, which bounds every exchange."""
     ctx.hive.enroll("vera", "validator")
     nova = Analyst("nova", ctx, provider=StubProvider())
     ctx.hive.send("vera", "nova", "peer.reply", {"answer": "duplicates, most likely"})
@@ -184,8 +183,7 @@ def test_pi_without_a_provider_still_splits_the_work(ctx: AgentContext):
     result = hugo.handle(_msg(ctx, "human", "hugo", "goal", goal="assemble a genome"))
     ctx.hive.route()
     assert result["ok"]
-    # The planner can always be given real work; the others have no inputs or
-    # metrics yet, so they are asked rather than handed an empty job.
+    # Only the planner has inputs; the others are asked, not tasked.
     assert [m.topic for m in ctx.hive.mailbox("ada").peek()] == ["plan.request"]
     assert [m.topic for m in ctx.hive.mailbox("iris").peek()] == ["peer.ask"]
     assert [m.topic for m in ctx.hive.mailbox("vera").peek()] == ["peer.ask"]
@@ -260,7 +258,7 @@ def test_a_failed_plan_becomes_a_question_not_a_silence(ctx: AgentContext):
 
 
 def test_a_goal_sent_straight_to_the_planner_is_planned(ctx: AgentContext):
-    """What a human does from the dashboard when they message the planner."""
+    """A goal sent directly to the planner produces a plan."""
     from bioharness.agents.roles import Planner
     from bioharness.core.registry import Registry as _Registry
     ada = Planner("ada", ctx)
@@ -271,7 +269,7 @@ def test_a_goal_sent_straight_to_the_planner_is_planned(ctx: AgentContext):
 
 
 def test_a_result_is_not_answered_with_another_result(ctx: AgentContext):
-    """`plan.request.result.result` is traffic nobody subscribes to."""
+    """Results are never replied to."""
     _staff(ctx.hive, quill="scribe", ada="planner")
     hugo = PI("hugo", ctx)
     ctx.hive.send("ada", "hugo", "plan.request.result",
@@ -284,8 +282,9 @@ def test_a_result_is_not_answered_with_another_result(ctx: AgentContext):
 
 
 def test_a_peer_question_is_not_an_invitation_to_decline(ctx: AgentContext):
-    """A prompt inviting the agent to say a question "falls outside your remit"
-    gets exactly that answer from every agent, so the prompt must not say it."""
+    """The peer-question prompt must not invite a "falls outside your remit"
+    answer.
+    """
     ctx.hive.enroll("nova", "analyst")
     provider = StubProvider("PCR duplicates, most likely.")
     quill = Scribe("quill", ctx, provider=provider)
@@ -294,7 +293,7 @@ def test_a_peer_question_is_not_an_invitation_to_decline(ctx: AgentContext):
     assert "falls outside your remit" not in asked
     assert "Never open by declining" in asked
     assert "name who should take the rest" in asked
-    # Refusing is still allowed for the one reason that matters.
+    # Declining is still allowed when answering would mean inventing data.
     assert "inventing data you do not have" in asked
 
 

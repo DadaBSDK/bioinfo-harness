@@ -1,7 +1,6 @@
 'use strict';
-/** Small orthographic 3D renderer. Real cuboid vertices, articulated limbs,
- * depth-sorted faces, and deliberately low-resolution pixel surfaces.
- * No network, WebGL, or build dependencies are needed on the lab machine. */
+/** Small orthographic 3D renderer for 2D-mode characters: cuboid geometry,
+ * articulated limbs, depth-sorted faces and pixel textures. No WebGL needed. */
 window.VoxelCharacter = (() => {
   const skins = ['#dca77c', '#a96f50', '#edc7a4', '#774e3a'];
   const hair = ['#352b29', '#523724', '#202b36', '#ad7848'];
@@ -23,7 +22,7 @@ window.VoxelCharacter = (() => {
           return project([cx + a*w/2, pivot + py*Math.cos(tilt) - pz*Math.sin(tilt),
             py*Math.sin(tilt) + pz*Math.cos(tilt)]);
         });
-      // Every face is sorted globally, so overlapping arms and bodies occlude correctly.
+      // Sort all faces globally so overlapping limbs occlude correctly.
       for (const [ids, shade] of [[[0,1,2,3],.30],[[4,7,6,5],0],[[0,3,7,4],.22],
                                 [[1,5,6,2],.12],[[3,2,6,7],-.10],[[0,4,5,1],.4]]) {
         const pts = ids.map(i => vertices[i]);
@@ -44,7 +43,7 @@ window.VoxelCharacter = (() => {
     box(0, 22, 0, 8, 8, 8, skin);
     box(0, 28, 0, 8.3, 2.5, 8.3, hair[seed % hair.length]);
     box(0, 24, -3.8, 8.2, 5, .8, hair[seed % hair.length]);
-    // Face pixels, collar, shirt seam and a coloured employee badge.
+    // Face, collar, shirt seam and badge details.
     box(-2, 25, 4.08, 1.5, 1.3, .2, '#263439');
     box(2, 25, 4.08, 1.5, 1.3, .2, '#263439');
     box(0, 23.4, 4.1, 2, .65, .2, '#925f4b');

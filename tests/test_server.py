@@ -191,7 +191,7 @@ def test_floor_state_seats_and_statuses_agents(live):
     f = get(base, "/api/floor")
     by = {a["name"]: a for a in f["agents"]}
     assert set(by) >= {"pi", "planner"}
-    # planner is holding the message pi sent it
+    # planner holds the message pi sent it
     assert by["planner"]["status"] == "awaiting"
     assert by["planner"]["inbox_pending"] == 1
     assert all("role" in a and "status" in a for a in f["agents"])

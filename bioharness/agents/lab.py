@@ -1,12 +1,7 @@
-"""The lab as a place: rooms, what is in them, and who sits where.
+"""The lab's floor plan: rooms, their instruments, and which roles work where.
 
-Without a map, agents furnish the building themselves, and no two of them agree
-on where anything is. This module is the single answer to "what is here and
-where is it", shared by the prompt an agent sees and the floor the operator
-watches.
-
-The room ids and labels match `ROOMS` in `ui/app.js`. If a room moves, it moves
-in both, or the lab an agent talks about stops being the lab you can see.
+Shared by agent prompts and the dashboard so agents only mention places that
+exist. Room ids and labels must match `ROOMS` in `ui/app.js`.
 """
 from __future__ import annotations
 

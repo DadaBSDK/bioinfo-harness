@@ -96,9 +96,7 @@ if __name__=='__main__':
     (OUT/'models.json').write_text(json.dumps({'version':1,'box_schema':['x','bottom_y','z','width','height','depth','material'],'materials':PALETTE,'models':MODELS},indent=2)+'\n')
     print(f'Generated {len(PALETTE)} textures and {len(MODELS)} models in {OUT}')
 
-# Portable, self-contained glTF binary exports of the same model recipes used
-# by the live renderer. Each file embeds its 16px textures and can be opened in
-# Blender or another glTF 2.0 viewer without the dashboard.
+# Export each model as a self-contained .glb with embedded textures.
 def export_glb(boxes):
     positions=[]; normals=[]; uvs=[]; indices=[]
     faces=[((1,0,0),[(.5,-.5,.5),(.5,-.5,-.5),(.5,.5,-.5),(.5,.5,.5)]),

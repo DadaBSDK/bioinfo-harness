@@ -1,14 +1,10 @@
-"""Getting data into the building.
+"""Data download capabilities (ENA runs, reference files).
 
-These are Python capabilities rather than shell one-liners on purpose. A fetch
-is where a pipeline meets the outside world -- an accession that does not exist,
-a mirror that 404s, a gzip stream that stops halfway -- and each of those
-deserves a sentence the operator can act on rather than `exited 2`. Writing it
-in the shell also means quoting a run directory into a command template, and
-this harness is quite capable of being installed under a path with a space in
-it.
+Implemented in Python rather than shell templates so failures (unknown
+accession, 404, truncated gzip) produce clear error messages and paths with
+spaces are handled safely.
 
-Standard library only: urllib and gzip, no curl, no SRA toolkit, no key.
+Standard library only: urllib and gzip.
 """
 from __future__ import annotations
 
@@ -41,10 +37,8 @@ def _open(url: str):
 
 def _download(url: str, dest: Path, max_lines: int = 0,
               fastq: bool = False) -> int:
-    """Stream a (possibly gzipped) file to `dest`, optionally truncated.
-
-    Truncation is by whole FASTQ records: half a record is not a smaller
-    dataset, it is a corrupt one.
+    """Stream a (possibly gzipped) file to `dest`, optionally truncated to whole
+    FASTQ records.
     """
     written = 0
     try:
@@ -59,9 +53,8 @@ def _download(url: str, dest: Path, max_lines: int = 0,
                     if max_lines and written >= max_lines:
                         break
     except EOFError:
-        # Stopping a gzip stream early is how truncation works, and the reader
-        # complains that it never saw the end-of-stream marker. Only a problem
-        # if nothing arrived at all, which the size check below catches.
+        # Expected when the stream is cut at max_lines; the size check below covers
+        # an empty download.
         pass
     except (urllib.error.URLError, OSError) as exc:
         if not written:
@@ -70,7 +63,7 @@ def _download(url: str, dest: Path, max_lines: int = 0,
         dest.unlink(missing_ok=True)
         raise FetchError(f"{url} gave nothing back")
     if fastq and written % 4:
-        # Half a record is not a smaller dataset, it is a corrupt one.
+        # Drop a trailing partial FASTQ record.
         keep = written - (written % 4)
         lines = dest.read_bytes().split(b"\n")
         dest.write_bytes(b"\n".join(lines[:keep]) + b"\n")
@@ -90,15 +83,13 @@ def ena(inputs: dict[str, Any], params: dict[str, Any], workdir: Path) -> dict[s
         with _open(ENA_REPORT.format(acc=acc)) as response:
             report = response.read().decode("utf-8", "replace").splitlines()
     except FetchError as exc:
-        # ENA answers a malformed accession with a 400, which is worth saying in
-        # words rather than handing back a URL and an HTTP code.
+        # ENA returns 400 for a malformed accession.
         raise FetchError(f"ENA does not recognise {acc!r} as a run accession "
                          f"(it wants SRR/ERR/DRR, not a BioProject or a sample "
                          f"id). ENA said: {str(exc)[-60:]}") from None
     if not report:
         raise FetchError(f"ENA returned an empty report for {acc!r}")
-    # By header name, not by position: the report leads with `run_accession`,
-    # and taking column 0 downloads the accession string as though it were a URL.
+    # Look up columns by header name; column 0 is `run_accession`, not a URL.
     header = report[0].split("\t")
     try:
         column = header.index("fastq_ftp")

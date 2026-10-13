@@ -70,8 +70,7 @@ class Orchestrator:
         self.ws.create({
             "workflow": workflow.name, "description": workflow.description,
             "params": merged, "dry_run": self.rails.dry_run,
-            # The DAG shape is recorded up front so a reader (the UI, an audit)
-            # can draw the graph even if the run dies halfway through.
+            # Record the DAG up front so it can be drawn even if the run dies.
             "graph": [{"id": s.id, "capability": s.capability, "needs": s.needs,
                        "scatter": s.scatter, "description": s.description}
                       for s in workflow.steps],
@@ -84,8 +83,7 @@ class Orchestrator:
         results: dict[str, Task] = {}
         started = time.time()
 
-        # In a dry run every step is SKIPPED by design, so skipping must not
-        # cascade -- otherwise only the first step would ever be resolved.
+        # Dry runs skip every step, so skips must not cascade.
         blocking = ({Status.FAILED, Status.BLOCKED} if self.rails.dry_run
                     else {Status.FAILED, Status.BLOCKED, Status.SKIPPED})
 
@@ -223,7 +221,7 @@ class Orchestrator:
     def _domain(self, capability: str) -> str:
         try:
             return self.registry.get(capability).domain
-        except Exception:  # noqa: BLE001 - an unknown capability fails later, clearly
+        except Exception:  # noqa: BLE001 - unknown capability, handled later
             return ""
 
     def _failed(self, step: Step, reason: str) -> Task:

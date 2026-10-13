@@ -140,8 +140,7 @@ class Executor:
         if self.rails.dry_run:
             task.status = Status.SKIPPED
             task.error = "dry-run"
-            # Predict what this step would emit so downstream templates still
-            # resolve -- a dry run is only useful if it validates the whole DAG.
+            # Predict outputs so downstream templates resolve during a dry run.
             task.outputs = self.predict(cap, task)
             self.ws.record("task.dry_run", {"step": task.step_id, "capability": cap.id,
                                             "argv": task.argv or task.rendered,
@@ -179,7 +178,7 @@ class Executor:
         except subprocess.TimeoutExpired:
             task.status = Status.FAILED
             task.error = f"timed out after {cap.resources.walltime_min} min"
-        except Exception as exc:  # noqa: BLE001 - a failing tool is data, not a crash
+        except Exception as exc:  # noqa: BLE001 - tool failures are recorded
             task.status = Status.FAILED
             task.error = str(exc)
         finally:
@@ -213,7 +212,7 @@ class Executor:
         out: dict[str, Any] = {}
         for port in cap.outputs:
             pattern = str(render_value(port.glob or port.name, context))
-            # A glob is a prediction, not a path; strip wildcards to a plausible name.
+            # Strip glob wildcards to get a plausible file name.
             name = pattern.replace("*", f"{task.step_id}").replace("?", "_")
             out[port.name] = [str(workdir / name)] if port.multiple else str(workdir / name)
         return out

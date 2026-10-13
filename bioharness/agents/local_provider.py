@@ -1,11 +1,7 @@
 """Local model provider, via an Ollama server on this machine.
 
-The point of the harness is that a lab can run it on its own hardware. A local
-model costs nothing per call and never sends sequence data or sample metadata
-off the box, which matters more in bioinformatics than in most domains.
-
-Stdlib only -- Ollama's HTTP API is small enough that pulling in a client
-library would be more dependency than it is worth.
+No per-call cost, and sequence data and sample metadata never leave the host.
+Uses the standard library only.
 """
 from __future__ import annotations
 
@@ -109,5 +105,5 @@ class OllamaProvider:
             seconds=time.time() - started,
             tokens_in=int(data.get("prompt_eval_count") or 0),
             tokens_out=int(data.get("eval_count") or 0),
-            usd=0.0,          # local inference: metered in tokens, not dollars
+            usd=0.0,          # local inference has no per-call cost
         )

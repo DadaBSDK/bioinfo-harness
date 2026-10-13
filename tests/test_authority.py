@@ -1,9 +1,4 @@
-"""The autonomy ladder, and agents that actually execute.
-
-Before this, `autonomy` was a stored label: nothing consulted it, so `read_only`
-restrained nothing and `full` granted nothing, and no agent could execute at all.
-These tests are what make the four levels mean something.
-"""
+"""Autonomy levels, enforced, and agents that execute workflows."""
 from __future__ import annotations
 
 import sys
@@ -168,8 +163,7 @@ def test_a_curator_block_stops_the_run(ctx: AgentContext):
 
 
 def test_a_runner_catches_a_parameter_nobody_declared(ctx: AgentContext):
-    """`{{ params.reads }}` with no `reads` anywhere fails at the first step with
-    a template error, which reads like a tool problem rather than a missing input."""
+    """A parameter referenced by a step but never declared is reported as missing."""
     ctx.hive.enroll("rex", "runner", autonomy="full")
     rex = Runner("rex", ctx)
     plan = {"name": "qc", "steps": [
@@ -211,7 +205,7 @@ def test_a_fetch_goal_plans_a_fetch_step(registry: Registry, tmp_path: Path):
         "start_type": "fastq", "goal_type": "vcf", "domain": "ngs"}))
     steps = [s["capability"] for s in result["workflow"]["steps"]]
     assert steps[0] == "ena_fetch", steps
-    # And the accession it needs is a visible parameter, not a default of "".
+    # The accession is surfaced as a required parameter.
     assert "accession" in result["workflow"]["params"]
 
 
@@ -229,14 +223,15 @@ def test_a_plan_with_holes_asks_the_operator_not_the_room(ctx: AgentContext):
     asked = ctx.hive.mailbox("human").peek()
     assert [m.topic for m in asked] == ["needs"]
     assert asked[0].body["needs"] == ["accession", "reference"]
-    # Nobody else was pulled into a conversation about it.
+    # No other agent was messaged.
     assert ctx.hive.mailbox("iris").peek() == []
     assert ctx.hive.mailbox("rex").peek() == []
 
 
 def test_an_order_does_not_ask_idle_agents_for_their_opinion_twice(ctx: AgentContext):
-    """Every agent already owes an order a verdict; asking six of them the same
-    question again bought seven essays and no work."""
+    """Agents already return a verdict on the order, so they are not also asked
+    for an opinion.
+    """
     for name, role in (("ada", "planner"), ("iris", "curator"),
                        ("nova", "analyst"), ("quill", "scribe")):
         ctx.hive.enroll(name, role)
@@ -250,8 +245,7 @@ def test_an_order_does_not_ask_idle_agents_for_their_opinion_twice(ctx: AgentCon
 
 
 def test_a_runner_refuses_a_fetch_with_no_accession(tmp_path: Path):
-    """It ran with an empty accession, contacted ENA, and failed inside the step
-    -- which reads as a broken tool rather than a question nobody answered."""
+    """A fetch with an empty accession is refused before it runs."""
     from bioharness.core.registry import Registry as Reg
     reg = Reg()
     reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
@@ -281,13 +275,12 @@ def test_a_runner_accepts_a_fetch_once_the_accession_is_given(tmp_path: Path):
     plan = {"name": "fetch", "steps": [
         {"id": "fetch", "capability": "ena_fetch",
          "params": {"accession": "SRR000001", "max_reads": 4}}]}
-    # Not executed here -- only that the pre-flight check lets it through.
+    # Only the pre-flight check is exercised; nothing runs.
     assert rex._demanded_params(plan) == set()
 
 
 def test_the_curator_is_not_asked_to_open_an_accession(tmp_path: Path):
-    """`accession=SRR000001` is not a path, and checking it as one blocked the
-    run for a missing file that was never meant to exist."""
+    """Non-file parameters such as an accession are not checked as paths."""
     from bioharness.core.registry import Registry as Reg
     reg = Reg()
     reg.load_path(Path(__file__).resolve().parents[1] / "capabilities")
@@ -312,8 +305,9 @@ def test_the_curator_is_not_asked_to_open_an_accession(tmp_path: Path):
 
 
 def test_a_model_plan_that_binds_a_parameter_as_a_file_is_corrected(tmp_path: Path):
-    """The model wrote `with: {accession: ...}` on a step that declares no input
-    ports at all, and the curator was sent to open a file called SRR000001."""
+    """A parameter bound as an input port (`with: {accession: ...}`) is moved to
+    the step's params.
+    """
     from bioharness.agents.roles import file_params, repair_plan
     from bioharness.core.registry import Registry as Reg
     reg = Reg()

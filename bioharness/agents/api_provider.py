@@ -1,9 +1,7 @@
 """Claude API provider: agents backed by the Anthropic SDK rather than a CLI.
 
-The CLI providers in `base.py` shell out to a tool the user already has logged
-in. This one talks to the API directly, which gives the harness two things the
-CLI cannot: real token usage per call (so the cost ledger stops being an
-estimate) and per-agent control of model, effort and thinking.
+Compared with the CLI providers in `base.py`, this reports real token usage
+per call and allows per-agent model, effort and thinking settings.
 """
 from __future__ import annotations
 
@@ -35,7 +33,7 @@ PRICING: dict[str, tuple[float, float]] = {
 # Models offered in the dashboard's hire form.
 MODELS = list(PRICING)
 
-# Roles that benefit from deeper reasoning get a higher default effort.
+# Default reasoning effort per role.
 ROLE_EFFORT = {
     "planner": "high", "analyst": "high", "pi": "high",
     "curator": "low", "validator": "low", "scribe": "medium",
@@ -100,8 +98,7 @@ class APIProvider:
         if self._client is None:
             if anthropic is None:
                 raise ProviderUnavailable("the `anthropic` package is not installed")
-            # Zero-arg construction resolves API key, auth token or a stored
-            # `ant auth login` profile, in that order.
+            # Resolves API key, auth token, or `ant auth login` profile, in that order.
             self._client = anthropic.Anthropic(timeout=self.timeout_s)
         return self._client
 
@@ -136,8 +133,7 @@ class APIProvider:
             raise ProviderUnavailable(f"rate limited; retry after {retry}s") from exc
         except anthropic.APIStatusError as exc:
             text = str(getattr(exc, "message", "") or exc)
-            # A valid key on an unfunded account fails here, not at auth. Say so
-            # plainly -- "API error 400" sends people hunting for a bad key.
+            # Out of credit fails here, not at auth; say so explicitly.
             if "credit balance" in text.lower() or "billing" in text.lower():
                 raise ProviderUnavailable(
                     "the API key is valid but the account has no credit balance "
@@ -147,7 +143,7 @@ class APIProvider:
         except anthropic.APIConnectionError as exc:
             raise ProviderUnavailable(f"network error reaching the API: {exc}") from exc
 
-        # A safety decline arrives as HTTP 200 -- check before reading content.
+        # Refusals arrive as HTTP 200; check before reading content.
         if response.stop_reason == "refusal":
             detail = getattr(response, "stop_details", None)
             category = getattr(detail, "category", None) if detail else None

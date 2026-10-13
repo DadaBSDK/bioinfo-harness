@@ -1,8 +1,6 @@
-"""Budgets and circuit breakers.
+"""Budgets, circuit breakers and autonomy checks.
 
-Bioinformatics runs fail expensively: a mis-specified MD simulation burns GPU
-hours, a runaway agent loop burns tokens. Every execution path in the harness
-goes through a Guardrails check first.
+Every execution path in the harness goes through a Guardrails check first.
 """
 from __future__ import annotations
 
@@ -127,12 +125,10 @@ class Guardrails:
 
     def permit(self, actor: dict[str, Any] | None, capability: str,
                domain: str = "") -> tuple[bool, str]:
-        """May `actor` execute `capability`? The autonomy ladder, enforced.
+        """May `actor` execute `capability` under its autonomy level?
 
-        Until this existed the four levels were a label: nothing consulted them,
-        so `read_only` restrained nothing and `full` granted nothing. A refusal
-        returns a reason rather than raising, so a blocked step is recorded in
-        the run like any other outcome instead of taking the mission down.
+        Returns (allowed, reason) rather than raising, so a refusal is recorded like
+        any other step outcome.
         """
         if actor is None:                      # a human at the CLI
             return True, ""
