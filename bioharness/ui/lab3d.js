@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from './vendor/OrbitControls.js';
 import { messagePose, freshTraffic } from './scene-logic.js';
 
-// World positions use the existing routing map, scaled to 32 pixels per metre.
+// World positions reuse the 2D floor's routing map, at 32 pixels per metre.
 const UNIT = 32, WIDTH = 1152, DEPTH = 672;
 const world = (x, z) => [(x - WIDTH / 2) / UNIT, (z - DEPTH / 2) / UNIT];
 const hash = name => Array.from(name).reduce((h,c) => (h*31+c.charCodeAt(0))>>>0, 7);
@@ -230,7 +230,7 @@ class LabScene {
         this.box(wall,cx,.15,back-.12,w+.3,1.55,.24,'plaster');
         this.box(wall,cx,1.7,back-.12,w+.35,.1,.29,'white');
         this.box(wall,cx,.57,back+.012,w,.1,.025,room.accent);
-        // Windows and strip lighting on the back wall, in original pixel materials.
+        // Windows and strip lighting on the back wall.
         for (const fx of [-.3,.3]) {
           this.box(wall,cx+w*fx,.85,back+.02,1.55,.63,.04,'metal');
           this.box(wall,cx+w*fx,.91,back+.05,1.43,.51,.025,'blue');
@@ -263,7 +263,7 @@ class LabScene {
       }
     }
     this.ambience(rooms);
-    // Original voxel DNA installation, hovering above the welcome atrium.
+    // A voxel DNA installation, hovering above the lobby.
     const lobby = rooms.find(r => r.id === 'lobby');
     if (lobby) {
       const [hx,hz] = world(lobby.x+lobby.w*.78,lobby.y+lobby.h*.5);

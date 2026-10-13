@@ -431,9 +431,9 @@ def cmd_ui(args: argparse.Namespace) -> int:
     print(f"  runs {dash.runs}")
     print(f"  hive {dash.hive_root}")
     if args.attend:
-        # The server itself stays read-only: this is a separate loop that
-        # happens to share the process, exactly as `bioharness attend` would in
-        # another terminal.
+        # The server never acts on what it receives: this is a separate loop
+        # that happens to share the process, exactly as `bioharness attend`
+        # would in another terminal.
         threading.Thread(target=attend, daemon=True,
                          args=(args.hive, args.capabilities),
                          kwargs={"max_usd": args.max_usd, "quiet": True, "only": args.only,
@@ -747,7 +747,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_brief_args(c)
     c.add_argument("--port", type=int, default=8765)
     c.add_argument("--host", default="127.0.0.1",
-                   help="loopback by default; the dashboard is read-only either way")
+                   help="loopback by default; anyone who can reach the dashboard can "
+                        "message and hire agents")
     c.add_argument("--no-open", action="store_true", help="do not open a browser")
     c.add_argument("--only", nargs="+", help="with --attend: only run these named agents")
     c.add_argument("--lab-name", metavar="NAME",

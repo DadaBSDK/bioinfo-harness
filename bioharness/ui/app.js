@@ -85,9 +85,8 @@ async function loadAtlas() {
 // `doorX` is the centre of the only opening.
 //
 // What stands in each room is the instrument list from `agents/lab.py`, drawn
-// with the nearest sprite the atlas has. That is the point of both files: the
-// lab an agent describes has to be the lab you can watch, down to the -80 in
-// the sequencing bay and the racks in the cold aisle.
+// with the nearest sprite the atlas has, so the lab an agent describes is the
+// lab you can watch.
 //
 //   wall        equipment along the back wall
 //   counter     a work surface across the room, which people stand at
@@ -134,7 +133,7 @@ const ROOMS = [
 
   // The lobby is a proper enclosed room too; its single door is in the top
   // wall, opening onto the same lower corridor the labs open onto. It reads as
-  // reception: a waiting side, the coin-eating coffee machine, and greenery.
+  // reception: a waiting side, the coffee machine, and greenery.
   { id: 'lobby', label: 'WAITING LOBBY', x: 16, y: 568, w: 1116, h: 80,
     tile: 'floor_wood', backWall: false, doorSide: 'top', doorX: 574,
     roles: ['operator'], accent: '#9a968e', wall: [],
@@ -298,10 +297,10 @@ function syncWorld() {
   if (state.agent && !pos[state.agent]) state.agent = null;
   if (WORLD.seen.size > 2000) WORLD.seen = new Set([...WORLD.seen].slice(-1000));
 
-  // A routed message becomes an errand: the sender walks over to the person,
-  // pauses with them, then heads back. Walking to the recipient's *desk* had
-  // the two of them swap rooms whenever they replied to each other -- the PI
-  // marching to the lobby while the human marched to the planning office.
+  // A routed message becomes an errand: the sender walks over to where the
+  // recipient is standing, pauses with them, then heads back. Aiming for the
+  // recipient's desk instead would make two people replying to each other
+  // swap rooms.
   const now = Date.now() / 1000;
   const TALKING_DISTANCE = 74;
   for (const t of state.floor?.traffic || []) {
@@ -689,8 +688,7 @@ const CHAR_H = 34 * SCALE;
 
 // -- overlay ---------------------------------------------------------------
 // Built once per roster change with coordinates relative to each actor, then
-// moved every frame with a transform -- rebuilding this at 60fps would be
-// wasteful and would kill the browser's text rendering cache.
+// moved every frame with a transform rather than rebuilt at 60fps.
 function floorOverlay() {
   const f = state.floor;
   if (!f) return '';
@@ -763,7 +761,7 @@ function paintBubbles(svg) {
   const now = performance.now();
   const parts = [];
   // Two people at neighbouring desks talk at the same time often enough that
-  // overlapping bubbles look like a bug. Anything that would cover a bubble
+  // overlapping bubbles are unreadable. Anything that would cover a bubble
   // already placed gets lifted above it instead.
   const placed = [];
   const speakers = Object.values(WORLD.actors)
@@ -1142,7 +1140,7 @@ function paintFloor() {
   updateHTML($('#cc-tabs'), CC_TABS.map(t =>
     `<button data-cc="${t}" aria-pressed="${state.cc === t}" class="${state.cc === t ? 'on' : ''}">${PANEL_NAMES[t]}</button>`).join(''));
   // Build the stage once; after that only the pixels and the overlay change.
-  // Recreating the canvas every tick threw away the drawing and flickered.
+  // Recreating the canvas every tick would discard the drawing and flicker.
   // Rebuild the overlay only when the roster changes; the animation loop moves
   // the existing groups every frame.
   const overlay = $('.flooroverlay');
@@ -1263,9 +1261,6 @@ function renderDag(graph, tasks, compact = false) {
     viewBox="0 0 ${width} ${height}">${edges}${nodes}</svg></div>`;
 }
 
-// ==========================================================================
-// Classic views
-// ==========================================================================
 // ==========================================================================
 // Conversation -- the roster's messages read back as an exchange
 // ==========================================================================

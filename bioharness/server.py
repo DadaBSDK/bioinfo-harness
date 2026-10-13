@@ -1,7 +1,9 @@
-"""Local read-only dashboard server.
+"""Local dashboard server.
 
-Binds to loopback by default and never mutates anything: every endpoint reads
-the same files the CLI writes. That means the UI can be pointed at a run
+Binds to loopback by default and never runs a workflow or calls a model. GET
+endpoints read the same files the CLI writes; the few POST endpoints only write
+into the hive -- a message, a hire or dismissal, the lab's name -- and acting on
+them is left to `bioharness attend`. That means the UI can be pointed at a run
 directory on a cluster (via `ssh -L`) with no risk of it disturbing the run.
 
 Stdlib only -- a bioinformatics box should not need a JS toolchain to see
@@ -319,9 +321,8 @@ class Dashboard:
             return {"ok": True, "dismissed": name}
         return {"ok": False, "error": f"no agent named {name!r}"}
 
-    # The one write path in the whole server: a human dropping a message into
-    # an agent's mailbox. Recipient must already be enrolled, topic must be
-    # one the roster actually handles.
+    # A human dropping a message into an agent's mailbox. The recipient must
+    # already be enrolled, and the topic must be one the roster handles.
     ALLOWED_TOPICS = ("goal", "mission", "plan.request", "data.validate",
                       "qc.check", "analyze", "report", "peer.ask",
                       "smalltalk", "greet", "run.request", "directive")
@@ -354,8 +355,6 @@ class Dashboard:
                     "hops": 0}
         # The operator's message opens a thread of its own, and everything said
         # in answer stays in it -- that thread is what a brief is built from.
-        # The operator's message opens a thread of its own, and everything said
-        # in answer stays in it -- that thread is what a brief is built from.
         msg = hive.send("human", to, topic, body)
         hive.event("message.queued_by_human", {"to": to, "topic": topic,
                                                "id": msg.id, "thread": msg.thread})
@@ -382,8 +381,8 @@ class Dashboard:
             return None
         pdf = self.brief_dir / f"brief-{thread}.pdf"
         if not pdf.is_file():
-            # Not written yet (or written before this run directory): build it
-            # now rather than showing the operator a dead link.
+            # No PDF on disk yet: build it on request rather than showing the
+            # operator a dead link.
             brief = gather(self.hive(), thread)
             if not brief:
                 return None
@@ -687,7 +686,7 @@ def serve(dashboard: Dashboard, host: str = "127.0.0.1", port: int = 8765,
         threading.Thread(target=httpd.serve_forever, daemon=True).start()
         return httpd
     print(f"  {url}")
-    print("  read-only; ctrl-c to stop")
+    print("  ctrl-c to stop")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

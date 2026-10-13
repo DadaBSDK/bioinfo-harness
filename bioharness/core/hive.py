@@ -474,9 +474,8 @@ class Hive:
         ordered = sorted(seen.values(), key=lambda m: float(m.get("ts", 0.0)))
         return ordered[-limit:] if limit else ordered
 
-    # Talk about the work and talk about the coffee rota are both real memories,
-    # and they live in separate files: one is evidence, the other is a running
-    # joke about a freezer that does not exist.
+    # Talk about the work and small talk are both kept, in separate files: the
+    # first is evidence that may be recalled for work, the second never is.
     MEMORY_FILES = {"memory": "memory.md", "social": "social.md"}
 
     def append_memory(self, agent: str, text: str, heading: str | None = None,

@@ -73,7 +73,7 @@ bioharness attend             # route mail and tick the roster until stopped
 bioharness attend --interval 5 --max-usd 2
 ```
 
-The server itself stays read-only either way: `--attend` is the same loop
+The server never acts on what it receives either way: `--attend` is the same loop
 running in a thread of the same process, never driven by an HTTP request.
 
 ### floor

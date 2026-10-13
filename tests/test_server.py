@@ -1,6 +1,6 @@
 """Dashboard server tests.
 
-The dashboard must be strictly read-only and must never crash the run it is
+The dashboard never executes anything and must never crash the run it is
 watching, so these cover the failure paths as much as the happy ones.
 """
 from __future__ import annotations
@@ -209,11 +209,11 @@ def test_idle_agent_when_nothing_pending(live):
     dash.hive().mailbox("planner").read(consume=True)     # drain the mail
     f = get(base, "/api/floor")
     planner = next(a for a in f["agents"] if a["name"] == "planner")
-    assert planner["status"] in ("idle", "working")       # never "awaiting" now
+    assert planner["status"] in ("idle", "working")       # nothing left to await
     assert planner["inbox_pending"] == 0
 
 
-# -- the one write path ----------------------------------------------------
+# -- writing to the hive ---------------------------------------------------
 def post(base: str, path: str, payload: dict):
     req = urllib.request.Request(
         base + path, data=json.dumps(payload).encode(),

@@ -60,7 +60,7 @@ def test_every_sprite_the_ui_asks_for_exists(atlas):
     frames = set(atlas["frames"])
 
     referenced: set[str] = set()
-    # ROLE_SPRITE / SPRITE_POOL / props lists / explicit fillTiles calls
+    # ROLE_SPRITE, SPRITE_POOL and the rooms' prop lists
     for prefix in ("char_", "sit_", "floor_", "wall_", "counter_"):
         referenced |= set(re.findall(rf"'({prefix}[a-z_]+)'", js))
     for key in ("wall", "floorProps"):

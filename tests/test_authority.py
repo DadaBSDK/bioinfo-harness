@@ -192,10 +192,10 @@ def test_a_runner_accepts_a_parameter_supplied_with_the_request(ctx: AgentContex
     assert result["ok"] is True
 
 
-# -- the order that produced seven essays and no work ----------------------
+# -- orders for data that is not here yet ----------------------------------
 def test_a_fetch_goal_plans_a_fetch_step(registry: Registry, tmp_path: Path):
-    """"Fetch the data online and run it" was unroutable: the type graph began
-    at a fastq file somebody had already downloaded by hand."""
+    """"Fetch the data online and run it" needs a route that starts with a
+    download, not with a fastq file somebody already has."""
     from bioharness.agents.roles import Planner, source_for
     from bioharness.core.registry import Registry as Reg
     reg = Reg()

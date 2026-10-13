@@ -28,9 +28,8 @@ from . import persona as persona_mod
 PROVIDERS: dict[str, list[str]] = {
     "claude":   ["claude", "-p"],
     "codex":    ["codex", "exec"],
-    # Google retired the standalone Gemini CLI in June 2026 in favour of the
-    # Antigravity CLI. `agy` has its own provider (antigravity_provider) rather
-    # than a generic wrapper, because it reports real token usage.
+    # `agy` (the Antigravity CLI) is not listed here: it has its own provider
+    # in antigravity_provider, because it reports real token usage.
     "gemini":   ["gemini", "-p"],
     "qwen":     ["qwen", "-p"],
     "opencode": ["opencode", "run"],

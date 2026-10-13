@@ -313,7 +313,7 @@ button.mini:hover { border-color: var(--fail); color: var(--fail); }
 }
 .briefline a { color: var(--accent); font-weight: 600; }
 
-/* Research workspace: quiet chrome around a richly detailed pixel world. */
+/* Research workspace theme: light panels around the lab view. */
 :root { --bg: #f3f5f1; --panel: #fcfdfb; --ink: #23382f; --muted: #748278;
   --line: #dfe6dc; --accent: #327351; --accent-soft: #e7f0e3; }
 header { height: 66px; padding: 0 28px; gap: 24px; }

@@ -51,8 +51,8 @@ def test_whois_resolves_a_role_to_a_hired_name(ctx: AgentContext):
 
 
 def test_pi_delegates_to_the_planner_by_role_not_by_name(ctx: AgentContext):
-    """The old code mailed the literal string "planner", which reached nobody
-    on a roster of real names."""
+    """Mailing the literal string "planner" would reach nobody on a roster of
+    real names."""
     ctx.hive.enroll("ada", "planner")
     hugo = PI("hugo", ctx)
     hugo.handle(_msg(ctx, "human", "hugo", "goal", goal="call variants"))
@@ -284,8 +284,8 @@ def test_a_result_is_not_answered_with_another_result(ctx: AgentContext):
 
 
 def test_a_peer_question_is_not_an_invitation_to_decline(ctx: AgentContext):
-    """Every agent used to answer "this falls outside my remit" — because the
-    prompt said "say plainly if this falls outside your remit". It no longer does."""
+    """A prompt inviting the agent to say a question "falls outside your remit"
+    gets exactly that answer from every agent, so the prompt must not say it."""
     ctx.hive.enroll("nova", "analyst")
     provider = StubProvider("PCR duplicates, most likely.")
     quill = Scribe("quill", ctx, provider=provider)

@@ -1,10 +1,9 @@
 """The lab as a place: rooms, what is in them, and who sits where.
 
-Without a map, agents furnish the building themselves. Ours invented a -80 with
-a broken alarm, a coin-eating coffee machine and a third-floor printer inside an
-hour -- charming, and no two agents ever agreed on where any of it was. This
-module is the single answer to "what is here and where is it", shared by the
-prompt an agent sees and the floor the operator watches.
+Without a map, agents furnish the building themselves, and no two of them agree
+on where anything is. This module is the single answer to "what is here and
+where is it", shared by the prompt an agent sees and the floor the operator
+watches.
 
 The room ids and labels match `ROOMS` in `ui/app.js`. If a room moves, it moves
 in both, or the lab an agent talks about stops being the lab you can see.

@@ -1,10 +1,8 @@
 # Getting data into the building.
 #
-# Without these the type graph starts at `fastq`, which means it starts at a
-# file the operator has already downloaded by hand. An order like "fetch the
-# banana salinity data and run it" was then unroutable, and the lab could only
-# discuss it: seven agents describing what they would do with reads nobody
-# could obtain. A fetch step is what turns that into a pipeline.
+# Without these the type graph starts at `fastq`, a file the operator has
+# already downloaded by hand, and an order like "fetch the data and run it" has
+# no route. A fetch step gives the planner somewhere to start.
 capabilities:
   - id: ena_fetch
     domain: ngs
